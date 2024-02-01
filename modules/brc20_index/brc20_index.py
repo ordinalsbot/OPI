@@ -7,9 +7,9 @@ import traceback, time, codecs, json
 import psycopg2
 import hashlib
 
-if not os.path.isfile('.env'):
-  print(".env file not found, please run \"python3 reset_init.py\" first")
-  sys.exit(1)
+# if not os.path.isfile('.env'):
+#   print(".env file not found, please run \"python3 reset_init.py\" first")
+#   sys.exit(1)
 
 ## global variables
 ticks = {}
