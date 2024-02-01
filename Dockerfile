@@ -11,8 +11,17 @@ FROM node:20.11-bullseye-slim
 
 WORKDIR /app
 
+# Install python and the python deps
+RUN apt update && apt install -y python3-pip \
+    && python3 -m pip install python-dotenv \
+    && python3 -m pip install psycopg2-binary \
+    && python3 -m pip install json5 \
+    && python3 -m pip install stdiomask \
+    && python3 -m pip install requests
+
 COPY . .
 
+# Install node deps
 RUN cd modules/main_index && npm install \
     && cd ../brc20_api && npm install \
     && cd ../bitmap_api && npm install
@@ -20,8 +29,3 @@ RUN cd modules/main_index && npm install \
 # Bundle ord binary
 COPY --from=builder /ord/target/release/ord /bin/ord
 
-EXPOSE 3000
-
-RUN npm install pm2 -g
-
-CMD ["pm2-runtime", "ecosystem.config.js"]
