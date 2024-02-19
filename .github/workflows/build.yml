@@ -48,3 +48,38 @@ jobs:
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+
+
+  deploy:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deploy to Dev
+      if: github.ref == 'refs/heads/dev'
+      run: |
+          curl -f \
+            -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: Bearer ${{ secrets.ACTIONS_GITHUB_PAT_DANIEL }}" \
+            --data '{"event_type": "deploy-dev"}' \
+            https://api.github.com/repos/ordinalsbot/infra/dispatches
+
+    - name: Deploy to Testnet
+      if: github.ref == 'refs/heads/dev'
+      run: |
+          curl -f \
+            -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: Bearer ${{ secrets.ACTIONS_GITHUB_PAT_DANIEL }}" \
+            --data '{"event_type": "deploy-testnet-public"}' \
+            https://api.github.com/repos/ordinalsbot/infra/dispatches
+
+    - name: Deploy to Staging
+      if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+      run: |
+          curl -f \
+            -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: Bearer ${{ secrets.ACTIONS_GITHUB_PAT_DANIEL }}" \
+            --data '{"event_type": "deploy-stage"}' \
+            https://api.github.com/repos/ordinalsbot/infra/dispatches
