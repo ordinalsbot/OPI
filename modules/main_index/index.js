@@ -196,7 +196,7 @@ async function main_index() {
         console.warn("Block repeating, possible reorg!!")
         let blockhash = parts[3].trim()
         let blockhash_db_q = await db_pool.query("select block_hash from block_hashes where block_height = $1;", [block_height])
-        if (blockhash_db_q.rows[0].block_hash != blockhash) {
+        if (blockhash_db_q.rows.length > 0 && blockhash_db_q.rows[0].block_hash != blockhash) {
           let reorg_st_tm = +(new Date())
           console.error("Reorg detected at block_height " + block_height)
           await handle_reorg(block_height)
