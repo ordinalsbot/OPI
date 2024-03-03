@@ -147,7 +147,7 @@ async function main_index() {
       network_argument = " --testnet"
     }
     
-    let ord_index_cmd = ord_binary + network_argument + " --bitcoin-data-dir " + chain_folder + " --data-dir " + ord_datadir + cookie_arg + " --height-limit " + (ord_end_block_height) + " " + rpc_argument + " index run"
+    let ord_index_cmd = ord_binary + network_argument + " --bitcoin-data-dir \"" + chain_folder + "\" --data-dir \"" + ord_datadir + "\"" + cookie_arg + " --height-limit " + (ord_end_block_height) + " " + rpc_argument + " index run"
 
     try {
       let version_string = execSync(ord_version_cmd).toString()
@@ -193,6 +193,7 @@ async function main_index() {
       if (parts[2].trim() == "new_block") {
         let block_height = parseInt(parts[1].trim())
         if (block_height > current_height) continue
+        if (block_height < first_inscription_height ) continue
         console.warn("Block repeating, possible reorg!!")
         let blockhash = parts[3].trim()
         let blockhash_db_q = await db_pool.query("select block_hash from block_hashes where block_height = $1;", [block_height])
