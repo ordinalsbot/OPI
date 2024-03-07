@@ -82,7 +82,7 @@ cur_metaprotocol = conn_metaprotocol.cursor()
 cur.execute('''SELECT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'brc20_block_hashes') AS table_existence;''')
 if cur.fetchone()[0] == False:
   print("Initialising database...")
-  with open('db_init.sql', 'r') as f:
+  with open('/app/modules/brc20_index/db_init.sql', 'r') as f:
     sql = f.read()
     cur.execute(sql)
   conn.commit()
@@ -91,7 +91,7 @@ if create_extra_tables:
   cur.execute('''SELECT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'brc20_extras_block_hashes') AS table_existence;''')
   if cur.fetchone()[0] == False:
     print("Initialising extra tables...")
-    with open('db_init_extra.sql', 'r') as f:
+    with open('/app/modules/brc20_index/db_init_extra.sql', 'r') as f:
       sql = f.read()
       cur.execute(sql)
     conn.commit()
