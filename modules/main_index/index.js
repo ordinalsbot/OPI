@@ -45,7 +45,11 @@ if (ord_folder.length == 0) {
 if (ord_folder[ord_folder.length - 1] != '/') ord_folder += '/'
 var ord_datadir = process.env.ORD_DATADIR || "."
 var cookie_file = process.env.COOKIE_FILE || ""
-var db_cache_size = process.env.DB_CACHE_SIZE || 8000000000
+var db_cache_size = process.env.db_cache_size
+var db_cache_argument = ""
+if (db_cache_size) {
+  db_cache_argument = " --db-cache-size=" + db_cache_size
+}
 
 const network_type = process.env.NETWORK_TYPE || "mainnet"
 
@@ -147,7 +151,7 @@ async function main_index() {
     } else if (network == bitcoin.networks.testnet) {
       network_argument = " --testnet"
     }
-    let ord_index_cmd = ord_binary + network_argument + " --bitcoin-data-dir \"" + chain_folder + "\" --data-dir \"" + ord_datadir + "\"" + cookie_arg + " --height-limit " + (ord_end_block_height) + " --db-cache-size=" + db_cache_size + " " + rpc_argument + " index run"
+    let ord_index_cmd = ord_binary + network_argument + " --bitcoin-data-dir \"" + chain_folder + "\" --data-dir \"" + ord_datadir + "\"" + cookie_arg + " --height-limit " + (ord_end_block_height) + db_cache_argument + " " + rpc_argument + " index run"
 
     try {
       let version_string = execSync(ord_version_cmd).toString()
