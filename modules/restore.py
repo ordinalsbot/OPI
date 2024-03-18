@@ -55,7 +55,7 @@ env = dotenv_values(dotenv_path='main_index/.env')
 db_user_main = env.get("DB_USER") or "postgres"
 db_host_main = env.get("DB_HOST") or "localhost"
 db_port_main = int(env.get("DB_PORT") or "5432")
-db_database_main = env.get("DB_DATABASE") or "postgres"
+db_database_main = env.get("DB_DATABASE") or "opi"
 db_password_main = env.get("DB_PASSWD")
 
 try:
@@ -89,7 +89,7 @@ if index_brc20:
   db_user_brc20 = env.get("DB_USER") or "postgres"
   db_host_brc20 = env.get("DB_HOST") or "localhost"
   db_port_brc20 = int(env.get("DB_PORT") or "5432")
-  db_database_brc20 = env.get("DB_DATABASE") or "postgres"
+  db_database_brc20 = env.get("DB_DATABASE") or "opi"
   db_password_brc20 = env.get("DB_PASSWD")
 
   try:
@@ -112,7 +112,7 @@ if index_bitmap:
   db_user_bitmap = env.get("DB_USER") or "postgres"
   db_host_bitmap = env.get("DB_HOST") or "localhost"
   db_port_bitmap = int(env.get("DB_PORT") or "5432")
-  db_database_bitmap = env.get("DB_DATABASE") or "postgres"
+  db_database_bitmap = env.get("DB_DATABASE") or "opi"
   db_password_bitmap = env.get("DB_PASSWD")
 
   try:
@@ -135,7 +135,7 @@ if index_sns:
   db_user_sns = env.get("DB_USER") or "postgres"
   db_host_sns = env.get("DB_HOST") or "localhost"
   db_port_sns = int(env.get("DB_PORT") or "5432")
-  db_database_sns = env.get("DB_DATABASE") or "postgres"
+  db_database_sns = env.get("DB_DATABASE") or "opi"
   db_password_sns = env.get("DB_PASSWD")
 
   try:
