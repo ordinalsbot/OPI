@@ -12,12 +12,14 @@ FROM node:20.11-bullseye-slim
 WORKDIR /app
 
 # Install python and the python deps
-RUN apt update && apt install -y python3-pip \
+RUN apt update && apt install -y python3-pip postgresql-client \
     && python3 -m pip install python-dotenv \
     && python3 -m pip install psycopg2-binary \
     && python3 -m pip install json5 \
     && python3 -m pip install stdiomask \
-    && python3 -m pip install requests
+    && python3 -m pip install requests \
+    && python3 -m pip install boto3 \
+    && python3 -m pip install tqdm
 
 COPY . .
 
