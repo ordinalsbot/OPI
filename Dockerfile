@@ -12,7 +12,7 @@ FROM node:20.11-bullseye-slim
 WORKDIR /app
 
 # Install python and the python deps
-RUN apt update && apt install -y python3-pip postgresql-client \
+RUN apt update && apt install -y python3-pip postgresql-client procps \
     && python3 -m pip install python-dotenv \
     && python3 -m pip install psycopg2-binary \
     && python3 -m pip install json5 \
