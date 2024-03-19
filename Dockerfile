@@ -28,7 +28,7 @@ RUN cd modules/main_index && npm install \
     && cd ../brc20_api && npm install \
     && cd ../bitmap_api && npm install
 
-RUN sysctl -w vm.max_map_count=655300
+RUN sudo sysctl -w vm.max_map_count=655300
 
 # Bundle ord binary
 COPY --from=builder /ord/target/release/ord /bin/ord
