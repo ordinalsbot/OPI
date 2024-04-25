@@ -66,6 +66,31 @@ app.get('/v1/brc20/db_version', async (request, response) => {
   }
 })
 
+// OB additions
+app.get('/v1/brc20/ticker_info', async (request, response) => {
+  try {
+    console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
+    if (!request.query.ticker) {
+      return response.status(400).send({ error: 'ticker is required', result: null })
+    }
+    let tick = request.query.ticker.toLowerCase() || ''
+    let query = ` select *
+                  from brc20_tickers
+                  where tick = $1;`
+    let params = [tick]
+
+    let res = await query_db(query, params)
+    if (res.rows.length == 0) {
+      response.status(400).send({ error: 'no ticker found', result: null })
+      return
+    }
+    response.send({ error: null, result: res.rows[0] })
+  } catch (err) {
+    console.log(err)
+    response.status(500).send({ error: 'internal error', result: null })
+  }
+});
+
 app.get('/v1/brc20/event_hash_version', async (request, response) => {
   try {
     console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
@@ -176,7 +201,10 @@ app.get('/v1/brc20/get_current_balance_of_wallet', async (request, response) => 
     console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
     let address = request.query.address || ''
     let pkscript = request.query.pkscript || ''
-    let tick = request.query.ticker.toLowerCase()
+    let tick = request.query.ticker?.toLowerCase() || ''
+    if (!address && !pkscript && !tick) {
+      return response.status(400).send({ error: 'address or pkscript is required', result: null })
+    }
 
     let current_block_height = await get_block_height_of_db()
     let balance = null
@@ -184,13 +212,17 @@ app.get('/v1/brc20/get_current_balance_of_wallet', async (request, response) => 
       let query = ` select overall_balance, available_balance
                     from brc20_historic_balances
                     where pkscript = $1
-                      and tick = $2
+                    and tick = $2
                     order by id desc
-                    limit 1;`
+                    ;`
       let params = [pkscript, tick]
       if (address != '') {
         query = query.replace('pkscript', 'wallet')
         params = [address, tick]
+      }
+      if (!tick) {
+        query = query.replace('and tick = $2', '')
+        params = [address || pkscript]
       }
 
       let res = await query_db(query, params)
@@ -200,15 +232,19 @@ app.get('/v1/brc20/get_current_balance_of_wallet', async (request, response) => 
       }
       balance = res.rows[0]
     } else {
-      let query = ` select overall_balance, available_balance
+      let query = ` select overall_balance, available_balance, block_height, tick
                     from brc20_current_balances
                     where pkscript = $1
                       and tick = $2
-                    limit 1;`
+                    ;`
       let params = [pkscript, tick]
       if (address != '') {
         query = query.replace('pkscript', 'wallet')
         params = [address, tick]
+      }
+      if (!tick) {
+        query = query.replace('and tick = $2', '')
+        params = [address || pkscript]
       }
 
       let res = await query_db(query, params)
@@ -216,10 +252,13 @@ app.get('/v1/brc20/get_current_balance_of_wallet', async (request, response) => 
         response.status(400).send({ error: 'no balance found', result: null })
         return
       }
-      balance = res.rows[0]
+      balance = res.rows
     }
-
-    balance.block_height = current_block_height
+    // add block_height to each row inside balance
+    balance = balance.map((row) => {
+      row.block_height = current_block_height
+      return row
+    })
     response.send({ error: null, result: balance })
   } catch (err) {
     console.log(err)
