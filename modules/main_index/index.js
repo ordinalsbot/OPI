@@ -62,7 +62,7 @@ if (network_type == "mainnet") {
   network = bitcoin.networks.testnet
   network_folder = "testnet3/"
 } else if (network_type == "signet") {
-  network = bitcoin.networks.testnet
+  network = bitcoin.networks.testnet // signet is not supported by bitcoinjs-lib but wallet_addr calculation is the same as testnet
   network_folder = "signet/"
 } else if (network_type == "regtest") {
   network = bitcoin.networks.regtest
