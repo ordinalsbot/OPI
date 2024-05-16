@@ -26,7 +26,8 @@ COPY . .
 # Install node deps
 RUN cd modules/main_index && npm install \
     && cd ../brc20_api && npm install \
-    && cd ../bitmap_api && npm install
+    && cd ../bitmap_api && npm install \
+    && cd ../sns_api && npm install
 
 # Bundle ord binary
 COPY --from=builder /ord/target/release/ord /bin/ord
