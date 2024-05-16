@@ -13,6 +13,7 @@ CREATE TABLE public.sns_names (
 	"name" text NOT NULL,
 	domain text NOT NULL,
 	block_height int4 NOT NULL,
+	address text,
 	CONSTRAINT sns_names_pk PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX sns_names_name_idx ON public.sns_names USING btree ("name");
@@ -20,6 +21,7 @@ CREATE INDEX sns_names_domain_idx ON public.sns_names USING btree (domain);
 CREATE INDEX sns_names_block_height_idx ON public.sns_names USING btree (block_height);
 CREATE INDEX sns_names_inscription_id_idx ON public.sns_names USING btree (inscription_id);
 CREATE INDEX sns_names_inscription_number_idx ON public.sns_names USING btree (inscription_number);
+CREATE INDEX sns_names_address_idx ON public.sns_names USING btree (address);
 
 CREATE TABLE public.sns_namespaces (
 	id bigserial NOT NULL,
