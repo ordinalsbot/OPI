@@ -310,6 +310,8 @@ def index_block(block_height, current_block_hash):
   if len(transfers) == 0:
     print("No transfers found for block " + str(block_height))
 
+  print("New transfers count: ", len(transfers))
+
   # use this to update address for sns_names inscription_ids
   for transfer in transfers:
     tx_id, inscription_id, old_satpoint, new_pkScript, new_wallet, sent_as_fee, js, content_type, parent_id = transfer
@@ -398,7 +400,7 @@ def populate_sns_addresses():
   if row is None: return
   address = row[0]
   
-  print("Updating address for inscription_id: " + str(inscription_id) + " to " + str(address))
+  # print("Updating address for inscription_id: " + str(inscription_id) + " to " + str(address))
   cur.execute('''update sns_names set address = %s where inscription_id = %s;''', (address, inscription_id))
   conn.commit()
 
