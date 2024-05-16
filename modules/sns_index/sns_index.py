@@ -406,6 +406,8 @@ def populate_sns_addresses():
   conn.commit()
 
 def populate_sns_addresses_loop():
+  time.sleep(30)
+  print("Starting to populate sns addresses...")
   while True:
     populate_sns_addresses()
 
