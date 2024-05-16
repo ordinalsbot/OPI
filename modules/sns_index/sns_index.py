@@ -399,6 +399,7 @@ def populate_sns_addresses():
   row = cur.fetchone()
   if row is None: return
   address = row[0]
+  if address is None: return
   
   # print("Updating address for inscription_id: " + str(inscription_id) + " to " + str(address))
   cur.execute('''update sns_names set address = %s where inscription_id = %s;''', (address, inscription_id))
