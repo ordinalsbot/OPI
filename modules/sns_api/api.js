@@ -158,4 +158,30 @@ app.get('/v1/sns/get_registered_namespaces', async (request, response) => {
   response.send({ error: null, result: res.rows })
 });
 
+app.get('/v1/sns/get_sns_count_of_address', async (request, response) => {
+  let address = request.query.address
+
+  let query = ` select count(*)
+                from sns_names
+                where address = $1;`
+  let params = [address]
+
+  let res = await db_pool.query(query, params)
+
+  response.send({ error: null, result: res.rows })
+});
+
+app.get('/v1/sns/get_sns_of_address', async (request, response) => {
+  let address = request.query.address
+
+  let query = ` select inscription_id, inscription_number, "name" as sns_name
+                from sns_names
+                where address = $1;`
+  let params = [address]
+
+  let res = await db_pool.query(query, params)
+
+  response.send({ error: null, result: res.rows })
+});
+
 app.listen(api_port, api_host);
