@@ -9,6 +9,7 @@ import psycopg2
 import hashlib
 import json5
 import requests
+import threading
 
 ## global variables
 in_commit = False
@@ -315,6 +316,7 @@ def index_block(block_height, current_block_hash):
   # use this to update address for sns_names inscription_ids
   for transfer in transfers:
     tx_id, inscription_id, old_satpoint, new_pkScript, new_wallet, sent_as_fee, js, content_type, parent_id = transfer
+    if new_wallet is None: continue
     if '\x00' in new_wallet: continue
     if utf8len(new_wallet) > 2048: 
       print("wallet is too long, skipping wallet: " + str(new_wallet))
@@ -464,7 +466,12 @@ def report_hashes(block_height):
 
 last_report_height = 0
 check_if_there_is_residue_from_last_run()
-populate_sns_addresses_loop()
+
+# start background thread to populate sns addresses
+background_thread = threading.Thread(target=populate_sns_addresses_loop)
+background_thread.daemon = True
+background_thread.start()
+
 while True:
   check_if_there_is_residue_from_last_run()
   ## check if a new block is indexed
