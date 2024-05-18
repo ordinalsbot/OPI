@@ -394,6 +394,8 @@ def populate_sns_addresses():
   row = cur.fetchone()
   if row is None: return
   inscription_id = row[0]
+  if inscription_id is None: return
+  print("Checking address for inscription_id: " + str(inscription_id))
 
   # get where this inscription is from ord_transfers
   # select * from ord_transfers where inscription_id ='xxx' desc block_height limit 1;
@@ -403,12 +405,13 @@ def populate_sns_addresses():
   address = row[0]
   if address is None: return
   
-  # print("Updating address for inscription_id: " + str(inscription_id) + " to " + str(address))
+  print("Updating address for inscription_id: " + str(inscription_id) + " to " + str(address))
   cur.execute('''update sns_names set address = %s where inscription_id = %s;''', (address, inscription_id))
   conn.commit()
 
 def populate_sns_addresses_loop():
-  time.sleep(30)
+  print("Waiting to start populate sns addresses...")
+  time.sleep(5)
   print("Starting to populate sns addresses...")
   while True:
     populate_sns_addresses()
