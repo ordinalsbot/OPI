@@ -399,7 +399,7 @@ def populate_sns_addresses():
 
   # get where this inscription is from ord_transfers
   # select * from ord_transfers where inscription_id ='xxx' desc block_height limit 1;
-  cur.execute('''select new_wallet from ord_transfers where inscription_id = %s order by block_height desc limit 1;''', (inscription_id,))
+  cur.execute('''select new_wallet from ord_transfers where inscription_id = %s and new_wallet is not null order by block_height desc limit 1;''', (inscription_id,))
   row = cur.fetchone()
   if row is None: return
   address = row[0]
