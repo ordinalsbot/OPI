@@ -391,23 +391,26 @@ def check_if_there_is_residue_from_last_run():
 
 def populate_sns_addresses():
   cur.execute('''select inscription_id from sns_names where address is null limit 1;''')
-  row = cur.fetchone()
-  if row is None: return
-  inscription_id = row[0]
-  if inscription_id is None: return
-  print("Checking address for inscription_id: " + str(inscription_id))
+  try:
+    row = cur.fetchone()
+    if row is None: return
+    inscription_id = row[0]
+    if inscription_id is None: return
+    print("Checking address for inscription_id: " + str(inscription_id))
 
-  # get where this inscription is from ord_transfers
-  # select * from ord_transfers where inscription_id ='xxx' desc block_height limit 1;
-  cur.execute('''select new_wallet from ord_transfers where inscription_id = %s and new_wallet is not null order by block_height desc limit 1;''', (inscription_id,))
-  row = cur.fetchone()
-  if row is None: return
-  address = row[0]
-  if address is None: return
-  
-  print("Updating address for inscription_id: " + str(inscription_id) + " to " + str(address))
-  cur.execute('''update sns_names set address = %s where inscription_id = %s;''', (address, inscription_id))
-  conn.commit()
+    # get where this inscription is from ord_transfers
+    # select * from ord_transfers where inscription_id ='xxx' desc block_height limit 1;
+    cur.execute('''select new_wallet from ord_transfers where inscription_id = %s and new_wallet is not null order by block_height desc limit 1;''', (inscription_id,))
+    row = cur.fetchone()
+    if row is None: return
+    address = row[0]
+    if address is None: return
+    
+    print("Updating address for inscription_id: " + str(inscription_id) + " to " + str(address))
+    cur.execute('''update sns_names set address = %s where inscription_id = %s;''', (address, inscription_id))
+    conn.commit()
+  except:
+    print("cur.fetchone() failed.")
 
 def populate_sns_addresses_loop():
   print("Waiting to start populate sns addresses...")
