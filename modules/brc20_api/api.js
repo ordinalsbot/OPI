@@ -128,8 +128,15 @@ app.get('/v1/brc20/balance_on_block', async (request, response) => {
   try {
     console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
     let block_height = request.query.block_height
+    let address = request.query.address || ''
     let pkscript = request.query.pkscript
+    if (!request.query.ticker) {
+      return response.status(400).send({ error: 'ticker is required', result: null })
+    }
     let tick = request.query.ticker.toLowerCase()
+    if (!address && !pkscript) {
+      return response.status(400).send({ error: 'address or pkscript is required', result: null })
+    }
 
     let current_block_height = await get_block_height_of_db()
     if (block_height > current_block_height + 1) {
@@ -144,7 +151,12 @@ app.get('/v1/brc20/balance_on_block', async (request, response) => {
                     and tick = $3
                   order by id desc
                   limit 1;`
-    let res = await query_db(query, [block_height, pkscript, tick])
+    let params = [block_height, pkscript, tick]
+    if (address != '') {
+      query = query.replace('pkscript', 'wallet')
+      params = [block_height, address, tick]
+    }
+    let res = await query_db(query, params)
     if (res.rows.length == 0) {
       response.status(400).send({ error: 'no balance found', result: null })
       return
