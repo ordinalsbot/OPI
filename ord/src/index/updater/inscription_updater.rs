@@ -497,7 +497,7 @@ impl<'a, 'db, 'tx> InscriptionUpdater<'a, 'db, 'tx> {
     }
     if to_write != "" {
       if self.first_in_block {
-        println!("cmd;{0};block_start", self.height,);
+        // println!("cmd;{0};block_start", self.height,);
         writeln!(log_file.as_ref().unwrap(), "cmd;{0};block_start", self.height,)?;
       }
       self.first_in_block = false;
@@ -515,7 +515,7 @@ impl<'a, 'db, 'tx> InscriptionUpdater<'a, 'db, 'tx> {
     &mut self,
   ) -> Result {
     if !self.first_in_block {
-      println!("cmd;{0};block_end", self.height);
+      // println!("cmd;{0};block_end", self.height);
       self.write_to_file(format!("cmd;{0};block_end", self.height), true)?;
     }
 

@@ -342,7 +342,7 @@ impl<'index> Updater<'_> {
       };
       *log_file = Some(File::options().append(true).open(format!("{chain_folder}log_file_index.txt")).unwrap());
     }
-    println!("cmd;{0};new_block;{1}", self.height, &block.header.block_hash());
+    // println!("cmd;{0};new_block;{1}", self.height, &block.header.block_hash());
     writeln!(log_file.as_ref().unwrap(), "cmd;{0};new_block;{1}", self.height, &block.header.block_hash())?;
     (log_file.as_ref().unwrap()).flush()?;
     
