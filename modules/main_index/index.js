@@ -236,6 +236,7 @@ async function main_index() {
       lines.push(line)
     }
     let lines_index = fs.readFileSync(ord_folder + network_folder + "log_file_index.txt", "utf8").split('\n')
+    console.log("main_index lines: " + lines?.length + " index: " + lines_index?.length);
     if (lines_index.length == 1) {
       console.log("Nothing new, waiting!!")
       continue
@@ -243,6 +244,7 @@ async function main_index() {
 
     let current_height_q = await db_pool.query(`SELECT coalesce(max(block_height), -1) as max_height from block_hashes;`)
     let current_height = current_height_q.rows[0].max_height
+    console.log('current_height: ' + current_height)
 
     console.log("Checking for possible reorg")
     for (const l of lines_index) {
@@ -458,6 +460,7 @@ async function main_index() {
         }
       }
     }
+    console.log('triggering remaining promises', running_promises?.length);
     await Promise.all(running_promises)
     running_promises = []
 
