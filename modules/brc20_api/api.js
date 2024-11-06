@@ -128,15 +128,15 @@ app.get('/v1/brc20/balance_on_block', async (request, response) => {
   try {
     console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
     let block_height = request.query.block_height
-    let address = request.query.address || ''
-    let pkscript = request.query.pkscript
+    let address = request.query.address || null
+    let pkscript = request.query.pkscript || null
+    if (!block_height) {
+      return response.status(400).send({ error: 'block_height is required', result: null })
+    }
     if (!request.query.ticker) {
       return response.status(400).send({ error: 'ticker is required', result: null })
     }
     let tick = request.query.ticker.toLowerCase()
-    if (!address && !pkscript) {
-      return response.status(400).send({ error: 'address or pkscript is required', result: null })
-    }
 
     let current_block_height = await get_block_height_of_db()
     if (block_height > current_block_height + 1) {
@@ -144,24 +144,19 @@ app.get('/v1/brc20/balance_on_block', async (request, response) => {
       return
     }
 
-    let query =  `select overall_balance, available_balance
-                  from brc20_historic_balances
-                  where block_height < $1
-                    and pkscript = $2
-                    and tick = $3
-                  order by id desc
-                  limit 1;`
-    let params = [block_height, pkscript, tick]
-    if (address != '') {
-      query = query.replace('pkscript', 'wallet')
-      params = [block_height, address, tick]
-    }
+    let query =  `select distinct on (${pkscript ? 'pkscript' : 'wallet'}) overall_balance, available_balance, pkscript, wallet
+      from brc20_historic_balances
+      where block_height <= $1
+        and (${pkscript ? 'pkscript' : 'wallet'} = $2 or $2 is null)
+        and tick = $3
+      order by ${pkscript ? 'pkscript' : 'wallet'}, block_height desc;`
+    let params = [block_height, pkscript || address, tick];
     let res = await query_db(query, params)
     if (res.rows.length == 0) {
       response.status(400).send({ error: 'no balance found', result: null })
       return
     }
-    response.send({ error: null, result: res.rows[0] })
+    response.send({ error: null, result: res.rows })
   } catch (err) {
     console.log(err)
     response.status(500).send({ error: 'internal error', result: null })
