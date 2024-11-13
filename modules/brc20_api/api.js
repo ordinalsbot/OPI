@@ -144,19 +144,27 @@ app.get('/v1/brc20/balance_on_block', async (request, response) => {
       return
     }
 
-    let query =  `select distinct on (${pkscript ? 'pkscript' : 'wallet'}) overall_balance, available_balance, pkscript, wallet
+    let query =  `select distinct on (${pkscript ? 'pkscript' : 'wallet'}) 
+      overall_balance, available_balance, pkscript, wallet
       from brc20_historic_balances
       where block_height <= $1
         and (${pkscript ? 'pkscript' : 'wallet'} = $2 or $2 is null)
         and tick = $3
-      order by ${pkscript ? 'pkscript' : 'wallet'}, block_height desc;`
+      order by ${pkscript ? 'pkscript' : 'wallet'}, block_height desc, id DESC;`
     let params = [block_height, pkscript || address, tick];
     let res = await query_db(query, params)
     if (res.rows.length == 0) {
       response.status(400).send({ error: 'no balance found', result: null })
       return
     }
-    response.send({ error: null, result: res.rows })
+
+    let rows = res.rows
+    // order rows using parseInt(overall_balance) desc
+    rows.sort((a, b) => parseInt(b.overall_balance) - parseInt(a.overall_balance))
+    // remove rows with parseInt(overall_balance) == 0
+    rows = rows.filter((row) => parseInt(row.overall_balance) != 0)
+
+    response.send({ error: null, result: rows })
   } catch (err) {
     console.log(err)
     response.status(500).send({ error: 'internal error', result: null })
