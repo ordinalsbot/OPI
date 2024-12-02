@@ -71,6 +71,7 @@ if (network_type == "mainnet") {
   console.error("Unknown network type: " + network_type)
   process.exit(1)
 }
+console.log('debuglog network_type:', network_type, 'network:', network);
 const first_inscription_heights = {
   'mainnet': 767430,
   'testnet': 2413343,
@@ -524,8 +525,10 @@ NOTE: removed following from node_modules/bitcoinjs-lib/src/payments/p2tr.js
 o.w. it cannot decode 512057cd4cfa03f27f7b18c2fe45fe2c2e0f7b5ccb034af4dec098977c28562be7a2
 */
 function wallet_from_pkscript(pkscript, network) {
+  console.log('debuglog pkscript:', pkscript, 'network:', network);
   try {
     let address = bitcoin.payments.p2tr({ output: Buffer.from(pkscript, 'hex'), network: network })
+    console.log('debuglog wallet_from_pkscript address:', address);
     return address.address
   } catch { /* try others */ }
   try {
