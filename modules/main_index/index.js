@@ -198,11 +198,11 @@ async function main_index() {
     }
 
     let network_argument = ""
-    if (network == bitcoin.networks.signet) {
+    if (network_type == 'signet') {
       network_argument = " --signet"
-    } else if (network == bitcoin.networks.regtest) {
+    } else if (network_type == 'regtest') {
       network_argument = " --regtest"
-    } else if (network == bitcoin.networks.testnet) {
+    } else if (network_type == 'testnet') {
       network_argument = " --testnet"
     }
     let ord_index_cmd = ord_binary + network_argument + " --bitcoin-data-dir \"" + chain_folder + "\" --data-dir \"" + ord_datadir + "\"" + cookie_arg + " --height-limit " + (ord_end_block_height) + db_cache_argument + " " + rpc_argument + " index run"
