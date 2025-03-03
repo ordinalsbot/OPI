@@ -563,4 +563,138 @@ app.get('/v1/brc20/event', async (request, response) => {
   }
 });
 
+// New endpoint to get all BRC-20 tokens with pagination and filtering
+// Environment variables for mint status control with clear naming
+const MINT_STATUS_COMPLETED_TEXT = process.env.MINT_STATUS_COMPLETED_TEXT || 'completed';
+const MINT_STATUS_NEARLY_FINISHED_TEXT = process.env.MINT_STATUS_NEARLY_FINISHED_TEXT || 'nearly_finished';
+const MINT_STATUS_NEWEST_MINT_TEXT = process.env.MINT_STATUS_NEWEST_MINT_TEXT || 'newest_mint';
+// const MINT_STATUS_HOTTEST_MINT_TEXT = process.env.MINT_STATUS_HOTTEST_MINT_TEXT || 'hottest mint';
+// const MINT_STATUS_OTHER_TEXT = process.env.MINT_STATUS_OTHER_TEXT || 'other';
+
+// Percentage threshold of max supply below which a token is considered nearly finished (e.g. 0.1 means 10% remaining)
+const MINT_FINISHED_THRESHOLD_PERCENTAGE = parseFloat(process.env.MINT_FINISHED_THRESHOLD_PERCENTAGE || '0.1');
+
+// Number of recent blocks considered for marking a token as a "newest mint"
+const NEWEST_MINT_BLOCKS = parseInt(process.env.NEWEST_MINT_BLOCKS || '100');
+
+/**
+ * GET /v1/brc20/tokens
+ * Returns an array of all BRC-20 tokens with optional filtering, pagination, and event counts.
+ *
+ * Query Parameters:
+ * @param {number} page - The page number for pagination (default: 1).
+ * @param {number} limit - The number of results per page (default: 10).
+ * @param {string} [ticker] - A keyword to filter tokens by their ticker (case-insensitive).
+ * @param {string} [mint_status] - The mint status filter:
+ *  - "completed": Tokens with no remaining supply.
+ *  - "nearly finished": Tokens with less than 10% of supply remaining.
+ *  - "newest mint": Tokens deployed in the most recent blocks.
+ * @param {boolean} [include_events] - If true, includes the count of "mint-inscribe" events for each token.
+ *
+ * Response:
+ * @returns {Object} JSON response with:
+ *  - {number} total - Total number of tokens matching the filters.
+ *  - {Array<Object>} result - The list of tokens, each containing:
+ *    - {string} tick - The token ticker.
+ *    - {number} max_supply - The maximum supply of the token.
+ *    - {number} remaining_supply - The remaining tokens to be minted.
+ *    - {number} limit_per_mint - Maximum tokens that can be minted per transaction.
+ *    - {number} block_height - Block height at which the token was deployed.
+ *    - {string} deploy_inscription_id - Unique ID of the token deployment.
+ *    - {number} holders - Count of unique wallet holders.
+ *    - {number} [mint_count] - (Optional) Count of "mint-inscribe" events.
+ */
+app.get('/v1/brc20/tokens', async (request, response) => {
+  try {
+    console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`);
+
+    let { page, limit, ticker, mint_status, include_events } = request.query;
+    
+    page = parseInt(page) || 1;
+    limit = parseInt(limit) || 10;
+    let offset = (page - 1) * limit;
+    include_events = include_events === 'true';
+
+    let whereClauses = [];
+    let params = [];
+
+    // Use existing index `brc20_tickers_lower_tick_idx` for case-insensitive `ILIKE`
+    if (ticker) {
+      whereClauses.push("LOWER(tick) ILIKE $"+(params.length+1));
+      params.push(`%${ticker}%`);
+    }
+
+    // Filter by mint status
+    if (mint_status) {
+      if (mint_status === MINT_STATUS_COMPLETED_TEXT) {
+        whereClauses.push("remaining_supply = 0");
+      } else if (mint_status === MINT_STATUS_NEARLY_FINISHED_TEXT) {
+        whereClauses.push("remaining_supply / max_supply < $"+(params.length+1));
+        params.push(MINT_FINISHED_THRESHOLD_PERCENTAGE);
+        // do not include tokens with 0 remaining supply
+        whereClauses.push("remaining_supply::numeric / max_supply > 0");
+      } else if (mint_status === MINT_STATUS_NEWEST_MINT_TEXT) {
+        whereClauses.push("block_height >= (SELECT MAX(block_height) - $"+(params.length+1)+" FROM brc20_tickers)");
+        params.push(NEWEST_MINT_BLOCKS);
+      }
+      console.log("mint_status", mint_status);
+      console.log("whereClauses", whereClauses);
+      console.log("params", params);
+    }
+
+    let whereSQL = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+
+    // Query to get total count for pagination
+    let countQuery = `SELECT COUNT(*) AS total FROM brc20_tickers ${whereSQL};`;
+    let countResult = await query_db(countQuery, params);
+    let totalTokens = countResult.rows[0].total;
+
+    // Query to get token data with pagination
+    let dataQuery = `
+      SELECT tick, max_supply, remaining_supply, limit_per_mint, block_height, deploy_inscription_id,
+        (SELECT COUNT(DISTINCT wallet) FROM brc20_current_balances WHERE brc20_current_balances.tick = brc20_tickers.tick) AS holders
+      FROM brc20_tickers
+      ${whereSQL}
+      ORDER BY block_height DESC
+      LIMIT $${params.length+1} OFFSET $${params.length+2};`;
+    
+    params.push(limit, offset);
+    let dataResult = await query_db(dataQuery, params);
+    let tokens = dataResult.rows;
+
+    // If include_events=true, fetch the mint-inscribe count
+    if (include_events && tokens.length > 0) {
+      let tickersList = tokens.map(t => t.tick);
+    
+      let eventsQuery = `
+        SELECT event->>'tick' AS tick, COUNT(*) AS mint_inscribes
+        FROM brc20_events
+        WHERE event_type = 1
+          AND event->>'tick' = ANY($1)
+        GROUP BY event->>'tick';
+      `;
+    
+      let eventsResult = await query_db(eventsQuery, [tickersList]);
+      let eventsMap = {};
+      eventsResult.rows.forEach(row => {
+        eventsMap[row.tick] = row.mint_inscribes;
+      });
+      tokens = tokens.map(t => ({
+        ...t,
+        mint_count: eventsMap[t.tick] || 0,
+      }));
+    } 
+
+    response.send({
+      error: null,
+      total: totalTokens,
+      result: tokens
+    });
+
+  } catch (err) {
+    console.log(err);
+    response.status(500).send({ error: 'internal error', result: null });
+  }
+});
+
 app.listen(api_port, api_host);
