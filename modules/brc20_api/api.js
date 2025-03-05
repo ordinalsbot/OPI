@@ -564,11 +564,15 @@ app.get('/v1/brc20/event', async (request, response) => {
 });
 
 // New endpoint to get all BRC-20 tokens with pagination and filtering
-// Environment variables for mint status control with clear naming
+// there are no available tokens to mint
 const MINT_STATUS_COMPLETED_TEXT = process.env.MINT_STATUS_COMPLETED_TEXT || 'completed';
+// less than 10% of the max supply remaining
 const MINT_STATUS_NEARLY_FINISHED_TEXT = process.env.MINT_STATUS_NEARLY_FINISHED_TEXT || 'nearly_finished';
+// most recently "deployed" tokens
 const MINT_STATUS_NEWEST_MINT_TEXT = process.env.MINT_STATUS_NEWEST_MINT_TEXT || 'newest_mint';
+// whats in the mempool
 // const MINT_STATUS_HOTTEST_MINT_TEXT = process.env.MINT_STATUS_HOTTEST_MINT_TEXT || 'hottest mint';
+// TODO: another status for most recently minted in the past 10 blocks
 // const MINT_STATUS_OTHER_TEXT = process.env.MINT_STATUS_OTHER_TEXT || 'other';
 
 // Percentage threshold of max supply below which a token is considered nearly finished (e.g. 0.1 means 10% remaining)
@@ -617,6 +621,9 @@ app.get('/v1/brc20/tokens', async (request, response) => {
 
     let whereClauses = [];
     let params = [];
+
+    // do not include tickers with length 5
+    whereClauses.push("LENGTH(tick) < 5");
 
     // Use existing index `brc20_tickers_lower_tick_idx` for case-insensitive `ILIKE`
     if (ticker) {
