@@ -565,15 +565,15 @@ app.get('/v1/brc20/event', async (request, response) => {
 
 // New endpoint to get all BRC-20 tokens with pagination and filtering
 // there are no available tokens to mint
-const MINT_STATUS_COMPLETED_TEXT = process.env.MINT_STATUS_COMPLETED_TEXT || 'completed';
+const MINT_STATUS_COMPLETED_TEXT = 'completed';
 // less than 10% of the max supply remaining
-const MINT_STATUS_NEARLY_FINISHED_TEXT = process.env.MINT_STATUS_NEARLY_FINISHED_TEXT || 'nearly_finished';
+const MINT_STATUS_NEARLY_FINISHED_TEXT = 'nearly_finished';
 // most recently "deployed" tokens
-const MINT_STATUS_NEWEST_MINT_TEXT = process.env.MINT_STATUS_NEWEST_MINT_TEXT || 'newest_mint';
+const MINT_STATUS_NEWEST_MINT_TEXT = 'newest_deploy';
 // whats in the mempool
-// const MINT_STATUS_HOTTEST_MINT_TEXT = process.env.MINT_STATUS_HOTTEST_MINT_TEXT || 'hottest mint';
-// TODO: another status for most recently minted in the past 10 blocks
-// const MINT_STATUS_OTHER_TEXT = process.env.MINT_STATUS_OTHER_TEXT || 'other';
+// const MINT_STATUS_HOTTEST_TEXT = 'hottest';
+// king of the hill~momentum - most minted in last 12 hours = 72 blocks + mempool
+// const MINT_STATUS_MOMENTUM_MINT_TEXT = 'momentum';
 
 // Percentage threshold of max supply below which a token is considered nearly finished (e.g. 0.1 means 10% remaining)
 const MINT_FINISHED_THRESHOLD_PERCENTAGE = parseFloat(process.env.MINT_FINISHED_THRESHOLD_PERCENTAGE || '0.1');
@@ -583,7 +583,7 @@ const NEWEST_MINT_BLOCKS = parseInt(process.env.NEWEST_MINT_BLOCKS || '100');
 
 /**
  * GET /v1/brc20/tokens
- * Returns an array of all BRC-20 tokens with optional filtering, pagination, and event counts.
+ * Returns an array of all BRC-20 tokens with optional filtering, pagination, and event counts, sorted by descending holder count.
  *
  * Query Parameters:
  * @param {number} page - The page number for pagination (default: 1).
@@ -662,7 +662,7 @@ app.get('/v1/brc20/tokens', async (request, response) => {
         (SELECT COUNT(DISTINCT wallet) FROM brc20_current_balances WHERE brc20_current_balances.tick = brc20_tickers.tick) AS holders
       FROM brc20_tickers
       ${whereSQL}
-      ORDER BY block_height DESC
+      ORDER BY holders DESC
       LIMIT $${params.length+1} OFFSET $${params.length+2};`;
     
     params.push(limit, offset);
