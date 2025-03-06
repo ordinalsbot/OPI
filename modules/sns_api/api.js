@@ -53,7 +53,14 @@ async function get_block_height_of_db() {
   return res.rows[0].max_block_height
 }
 
-app.get('/v1/sns/block_height', (request, response) => response.send(get_block_height_of_db()))
+app.get('/v1/sns/block_height', async (request, response) => {
+  try {
+    const blockHeight = await get_block_height_of_db();
+    response.send(blockHeight.toString());
+  } catch (error) {
+    response.status(500).send('Error fetching block height');
+  }
+});
 
 app.get('/v1/sns/get_hash_of_all_activity', async (request, response) => {
   let block_height = request.params.block_height
