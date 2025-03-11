@@ -708,32 +708,30 @@ app.get('/v1/brc20/tokens', async (request, response) => {
 app.get('/v1/brc20/mempool_events', async (request, response) => {
   try {
     console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
+    
+    let tick = request.query.ticker?.toLowerCase() || '';
 
-    // let res1 = await query_db('select event_type_name, event_type_id from brc20_event_types;')
-    // let event_type_id_to_name = {}
-    // res1.rows.forEach((row) => {
-    //   event_type_id_to_name[row.event_type_id] = row.event_type_name
-    // })
+    let query;
+    let params = [];
+    
+    if (tick) {
+      query = `
+        SELECT *
+        FROM brc20_mempool_events
+        WHERE lower(event->>'tick') = $1
+        ORDER BY seen_at DESC;
+      `;
+      params.push(tick);
+    } else {
+      query = `
+        SELECT *
+        FROM brc20_mempool_events
+        ORDER BY seen_at DESC;
+      `;
+    }
+    
+    let res = await query_db(query, params);
 
-    // let inscription_id = request.query.inscription_id;
-    // if(!inscription_id) {
-    //   response.status(400).send({ error: 'inscription_id is required', result: null })
-    //   return
-    // }
-
-    let query =  `select *
-                  from brc20_mempool_events
-                  order by seen_at desc;`
-    let res = await query_db(query, [])
-    // let result = []
-    // for (const row of res.rows) {
-    //   let event = row.event
-    //   let event_type = event_type_id_to_name[row.event_type]
-    //   let inscription_id = row.inscription_id
-    //   event.event_type = event_type
-    //   event.inscription_id = inscription_id
-    //   result.push(event)
-    // }
     response.send({ error: null, result: res.rows })
   } catch (err) {
     console.log(err)

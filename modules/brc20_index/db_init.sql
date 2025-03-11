@@ -114,3 +114,5 @@ CREATE INDEX brc20_mempool_events_seen_at_idx
   ON public.brc20_mempool_events USING btree (seen_at);
 CREATE INDEX brc20_mempool_events_event_gin_idx 
   ON public.brc20_mempool_events USING gin ("event");
+CREATE INDEX brc20_mempool_events_event_tick_lower_idx 
+  ON public.brc20_mempool_events USING btree (lower("event"->>'tick'));
