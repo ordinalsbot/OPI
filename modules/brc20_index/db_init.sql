@@ -82,3 +82,35 @@ CREATE TABLE public.brc20_indexer_version (
 	CONSTRAINT brc20_indexer_version_pk PRIMARY KEY (id)
 );
 INSERT INTO public.brc20_indexer_version (indexer_version, db_version, event_hash_version) VALUES ('opi-brc20-full-node v0.4.1', 5, 2);
+
+CREATE TABLE public.brc20_mempool_timestamp (
+    key text PRIMARY KEY,              -- e.g., always 'latest'
+    latest_timestamp timestamptz NOT NULL
+);
+
+-- for mempool tracking
+CREATE TABLE public.brc20_mempool_events (
+	id bigserial NOT NULL,
+	txid text NOT NULL,
+	event_type int4 NOT NULL,
+	block_height int4 NOT NULL,
+	"event" jsonb NOT NULL,
+	old_satpoint text NOT NULL,
+	new_pkScript text NOT NULL,
+	new_addr text NOT NULL,
+	sent_as_fee boolean NOT NULL,
+	content_type text NOT NULL,
+	parent_id text NOT NULL,
+	seen_at timestamptz NOT NULL,
+	CONSTRAINT brc20_mempool_events_id PRIMARY KEY (id),
+	CONSTRAINT brc20_mempool_events_txid_event_type_key UNIQUE (txid, event_type)
+);
+
+CREATE INDEX brc20_mempool_events_txid_idx ON public.brc20_mempool_events USING btree (txid);
+CREATE INDEX brc20_mempool_events_block_height_idx ON public.brc20_mempool_events USING btree (block_height);
+CREATE INDEX brc20_mempool_events_event_type_idx ON public.brc20_mempool_events USING btree (event_type);
+CREATE INDEX brc20_mempool_events_addr_idx ON public.brc20_mempool_events USING btree (new_addr);
+CREATE INDEX brc20_mempool_events_seen_at_idx 
+  ON public.brc20_mempool_events USING btree (seen_at);
+CREATE INDEX brc20_mempool_events_event_gin_idx 
+  ON public.brc20_mempool_events USING gin ("event");
