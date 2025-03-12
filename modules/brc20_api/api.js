@@ -712,7 +712,7 @@ app.get('/v1/brc20/tokens', async (request, response) => {
         // check event_type and increment deploy if 0, mint if 1
         let event = row.event;
         let event_type = row.event_type;
-        let tick = event.tick;
+        let tick = event.tick.toLowerCase();
         if (event_type === 0) {
           mempoolMap[tick] = mempoolMap[tick] || { deploy: 0, mint: 0 };
           mempoolMap[tick].deploy++;
