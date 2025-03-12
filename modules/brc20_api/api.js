@@ -594,25 +594,29 @@ const NEWEST_MINT_BLOCKS = parseInt(process.env.NEWEST_MINT_BLOCKS || '100');
  *  - "nearly finished": Tokens with less than 10% of supply remaining.
  *  - "newest mint": Tokens deployed in the most recent blocks.
  * @param {boolean} [include_events] - If true, includes the count of "mint-inscribe" events for each token.
+ * @param {boolean} [include_mempool] - If true, includes the list of mempool counts for each token.
  *
  * Response:
  * @returns {Object} JSON response with:
  *  - {number} total - Total number of tokens matching the filters.
  *  - {Array<Object>} result - The list of tokens, each containing:
- *    - {string} tick - The token ticker.
- *    - {number} max_supply - The maximum supply of the token.
- *    - {number} remaining_supply - The remaining tokens to be minted.
- *    - {number} limit_per_mint - Maximum tokens that can be minted per transaction.
- *    - {number} block_height - Block height at which the token was deployed.
- *    - {string} deploy_inscription_id - Unique ID of the token deployment.
- *    - {number} holders - Count of unique wallet holders.
- *    - {number} [mint_count] - (Optional) Count of "mint-inscribe" events.
+ *  - {string} tick - The token ticker.
+ *  - {number} max_supply - The maximum supply of the token.
+ *  - {number} remaining_supply - The remaining tokens to be minted.
+ *  - {number} limit_per_mint - Maximum tokens that can be minted per transaction.
+ *  - {number} block_height - Block height at which the token was deployed.
+ *  - {string} deploy_inscription_id - Unique ID of the token deployment.
+ *  - {boolean} is_self_mint - Whether the token has self-mint=true which means its a 5-byte ticker and it can not be fairly minted
+ *  - {number} holders - Count of unique wallet holders.
+ *  - {number} [mint_count] - (Optional) Count of "mint-inscribe" events.
+ *  - {number} [mempool_mint_count] - (Optional) Count of "mint" events in the mempool.
+ *  - {number} [mempool_deploy_count] - (Optional) Count of "deploy" events in the mempool.
  */
 app.get('/v1/brc20/tokens', async (request, response) => {
   try {
     console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`);
 
-    let { page, limit, ticker, mint_status, include_events } = request.query;
+    let { page, limit, ticker, mint_status, include_events, include_mempool } = request.query;
     
     page = parseInt(page) || 1;
     limit = parseInt(limit) || 10;
@@ -624,6 +628,9 @@ app.get('/v1/brc20/tokens', async (request, response) => {
 
     // do not include tickers with length 5
     whereClauses.push("LENGTH(tick) < 5");
+    // I'm convinced all is_self_mint=true is 5-byte tickers
+    // confirmed with ddomo as well
+    whereClauses.push("is_self_mint = false");
 
     // Use existing index `brc20_tickers_lower_tick_idx` for case-insensitive `ILIKE`
     if (ticker) {
@@ -658,7 +665,7 @@ app.get('/v1/brc20/tokens', async (request, response) => {
 
     // Query to get token data with pagination
     let dataQuery = `
-      SELECT tick, max_supply, remaining_supply, limit_per_mint, block_height, deploy_inscription_id,
+      SELECT tick, max_supply, remaining_supply, limit_per_mint, block_height, deploy_inscription_id, is_self_mint, 
         (SELECT COUNT(DISTINCT wallet) FROM brc20_current_balances WHERE brc20_current_balances.tick = brc20_tickers.tick) AS holders
       FROM brc20_tickers
       ${whereSQL}
@@ -692,6 +699,38 @@ app.get('/v1/brc20/tokens', async (request, response) => {
       }));
     } 
 
+    // If include_mempool=true, fetch the mempool events from brc20_mempool_events at current blockheight
+    if (include_mempool && tokens.length > 0) {
+      let mempoolQuery = `
+        SELECT *
+        FROM brc20_mempool_events
+        WHERE lower(event->>'tick') = ANY($1) AND block_height = $2
+        ORDER BY seen_at DESC;
+      `;
+      const current_block_height = await get_block_height_of_db();
+      let tickersList = tokens.map(t => t.tick);
+      let mempoolResult = await query_db(mempoolQuery, [tickersList, current_block_height]);
+      let mempoolMap = {};
+      mempoolResult.rows.forEach(row => {
+        // check event_type and increment deploy if 0, mint if 1
+        let event = row.event;
+        let event_type = row.event_type;
+        let tick = event.tick.toLowerCase();
+        if (event_type === 0) {
+          mempoolMap[tick] = mempoolMap[tick] || { deploy: 0, mint: 0 };
+          mempoolMap[tick].deploy++;
+        } else if (event_type === 1) {
+          mempoolMap[tick] = mempoolMap[tick] || { deploy: 0, mint: 0 };
+          mempoolMap[tick].mint++;
+        }
+      });
+      tokens = tokens.map(t => ({
+        ...t,
+        mempool_mint_count: mempoolMap[t.tick]?.mint || 0,
+        mempool_deploy_count: mempoolMap[t.tick]?.deploy || 0,
+      }));
+    }
+
     response.send({
       error: null,
       total: totalTokens,
@@ -701,6 +740,41 @@ app.get('/v1/brc20/tokens', async (request, response) => {
   } catch (err) {
     console.log(err);
     response.status(500).send({ error: 'internal error', result: null });
+  }
+});
+
+// get all events with a specific inscription id
+app.get('/v1/brc20/mempool_events', async (request, response) => {
+  try {
+    console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
+    
+    let tick = request.query.ticker?.toLowerCase() || '';
+
+    let query;
+    let params = [];
+    
+    if (tick) {
+      query = `
+        SELECT *
+        FROM brc20_mempool_events
+        WHERE lower(event->>'tick') = $1
+        ORDER BY seen_at DESC;
+      `;
+      params.push(tick);
+    } else {
+      query = `
+        SELECT *
+        FROM brc20_mempool_events
+        ORDER BY seen_at DESC;
+      `;
+    }
+    
+    let res = await query_db(query, params);
+
+    response.send({ error: null, result: res.rows })
+  } catch (err) {
+    console.log(err)
+    response.status(500).send({ error: 'internal error', result: null })
   }
 });
 
