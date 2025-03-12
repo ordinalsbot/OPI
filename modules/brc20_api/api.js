@@ -594,20 +594,23 @@ const NEWEST_MINT_BLOCKS = parseInt(process.env.NEWEST_MINT_BLOCKS || '100');
  *  - "nearly finished": Tokens with less than 10% of supply remaining.
  *  - "newest mint": Tokens deployed in the most recent blocks.
  * @param {boolean} [include_events] - If true, includes the count of "mint-inscribe" events for each token.
- * @param {boolean} [include_mempool] - If true, includes the list of mempool events for each token.
+ * @param {boolean} [include_mempool] - If true, includes the list of mempool counts for each token.
  *
  * Response:
  * @returns {Object} JSON response with:
  *  - {number} total - Total number of tokens matching the filters.
  *  - {Array<Object>} result - The list of tokens, each containing:
- *    - {string} tick - The token ticker.
- *    - {number} max_supply - The maximum supply of the token.
- *    - {number} remaining_supply - The remaining tokens to be minted.
- *    - {number} limit_per_mint - Maximum tokens that can be minted per transaction.
- *    - {number} block_height - Block height at which the token was deployed.
- *    - {string} deploy_inscription_id - Unique ID of the token deployment.
- *    - {number} holders - Count of unique wallet holders.
- *    - {number} [mint_count] - (Optional) Count of "mint-inscribe" events.
+ *  - {string} tick - The token ticker.
+ *  - {number} max_supply - The maximum supply of the token.
+ *  - {number} remaining_supply - The remaining tokens to be minted.
+ *  - {number} limit_per_mint - Maximum tokens that can be minted per transaction.
+ *  - {number} block_height - Block height at which the token was deployed.
+ *  - {string} deploy_inscription_id - Unique ID of the token deployment.
+ *  - {boolean} is_self_mint - Whether the token has self-mint=true which means its a 5-byte ticker and it can not be fairly minted
+ *  - {number} holders - Count of unique wallet holders.
+ *  - {number} [mint_count] - (Optional) Count of "mint-inscribe" events.
+ *  - {number} [mempool_mint_count] - (Optional) Count of "mint" events in the mempool.
+ *  - {number} [mempool_deploy_count] - (Optional) Count of "deploy" events in the mempool.
  */
 app.get('/v1/brc20/tokens', async (request, response) => {
   try {
