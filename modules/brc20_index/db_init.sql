@@ -119,4 +119,8 @@ CREATE INDEX brc20_mempool_events_event_tick_lower_idx
   ON public.brc20_mempool_events USING btree (lower("event"->>'tick'));
 CREATE INDEX brc20_mempool_events_tick_block_height_idx 
   ON public.brc20_mempool_events USING btree (lower("event"->>'tick'), block_height);
+CREATE INDEX brc20_events_event_type_tick_block_height_idx
+  ON brc20_events (event_type, block_height, (event->>'tick'::text));
+CREATE INDEX brc20_mempool_events_event_type_block_height_tick_lower_idx
+  ON brc20_mempool_events (event_type, block_height, lower(event->>'tick'));
 
