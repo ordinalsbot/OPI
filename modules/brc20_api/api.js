@@ -653,6 +653,8 @@ app.get('/v1/brc20/tokens', async (request, response) => {
         whereClauses.push("block_height >= (SELECT MAX(block_height) - $"+(params.length+1)+" FROM brc20_tickers)");
         params.push(NEWEST_MINT_BLOCKS);
 
+        whereSQL = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+
         // sort by block height descending
         dataQuery = `
           SELECT *
@@ -679,7 +681,7 @@ app.get('/v1/brc20/tokens', async (request, response) => {
         // do not include tokens with 0 remaining supply
         whereClauses.push("remaining_supply::numeric / max_supply > 0");
 
-        let whereSQL = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+        whereSQL = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
 
         // calculate momentum score = minted in last 72 blocks + mempool minted
         dataQuery = `
