@@ -253,6 +253,7 @@ async function main_index() {
     console.log("main_index lines: " + lines?.length + " index: " + lines_index?.length);
     if (lines_index.length == 1) {
       console.log("Nothing new, waiting!!")
+      await delay(2)
       continue
     }
 
