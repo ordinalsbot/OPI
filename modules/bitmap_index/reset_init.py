@@ -17,12 +17,12 @@ if init_env:
   DB_USER="postgres"
   DB_HOST="localhost"
   DB_PORT="5432"
-  DB_DATABASE="postgres"
+  DB_DATABASE="opi"
   DB_PASSWD=""
   DB_METAPROTOCOL_USER="postgres"
   DB_METAPROTOCOL_HOST="localhost"
   DB_METAPROTOCOL_PORT="5432"
-  DB_METAPROTOCOL_DATABASE="postgres"
+  DB_METAPROTOCOL_DATABASE="opi"
   DB_METAPROTOCOL_PASSWD=""
   NETWORK_TYPE="mainnet"
   REPORT_TO_INDEXER="true"
@@ -42,7 +42,7 @@ if init_env:
     DB_USER = env.get("DB_USER") or "postgres"
     DB_HOST = env.get("DB_HOST") or "localhost"
     DB_PORT = env.get("DB_PORT") or "5432"
-    DB_DATABASE = env.get("DB_DATABASE") or "postgres"
+    DB_DATABASE = env.get("DB_DATABASE") or "opi"
     DB_PASSWD = env.get("DB_PASSWD")
   else:
     res = input("Bitmap Postgres DB username (Default: postgres): ")
@@ -54,7 +54,7 @@ if init_env:
     res = input("Bitmap Postgres DB port (Default: 5432): ")
     if res != '':
       DB_PORT = res
-    res = input("Bitmap Postgres DB name (Default: postgres) leave default if no new dbs are created: ")
+    res = input("Bitmap Postgres DB name (Default: opi) leave default if no new dbs are created: ")
     if res != '':
       DB_DATABASE = res
     res = stdiomask.getpass("Bitmap Postgres DB password: ")

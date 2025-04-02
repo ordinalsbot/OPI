@@ -37,3 +37,12 @@ CREATE TABLE public.brc20_extras_block_hashes (
 	CONSTRAINT brc20_extras_block_hashes_pk PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX brc20_extras_block_hashes_block_height_idx ON public.brc20_extras_block_hashes USING btree (block_height);
+
+--- added for /tokens endpoint
+CREATE INDEX brc20_tickers_lower_tick_idx ON public.brc20_tickers (LOWER(tick));
+CREATE INDEX brc20_events_event_type_jsonb_idx ON public.brc20_events (event_type) INCLUDE (event);
+CREATE INDEX brc20_events_tick_idx
+  ON public.brc20_events ((event->>'tick'))
+  WHERE event_type = 1;
+
+CREATE INDEX brc20_events_type_tick_idx ON public.brc20_events (event_type, (event->>'tick'));

@@ -53,7 +53,14 @@ async function get_block_height_of_db() {
   return res.rows[0].max_block_height
 }
 
-app.get('/v1/sns/block_height', (request, response) => response.send(get_block_height_of_db()))
+app.get('/v1/sns/block_height', async (request, response) => {
+  try {
+    const blockHeight = await get_block_height_of_db();
+    response.send(blockHeight.toString());
+  } catch (error) {
+    response.status(500).send('Error fetching block height');
+  }
+});
 
 app.get('/v1/sns/get_hash_of_all_activity', async (request, response) => {
   let block_height = request.params.block_height
@@ -152,6 +159,32 @@ app.get('/v1/sns/get_inscriptions_of_domain', async (request, response) => {
 app.get('/v1/sns/get_registered_namespaces', async (request, response) => {
   let query = ` select inscription_id, inscription_number, "namespace"
                 from sns_namespaces;`
+
+  let res = await db_pool.query(query, params)
+
+  response.send({ error: null, result: res.rows })
+});
+
+app.get('/v1/sns/get_sns_count_of_address', async (request, response) => {
+  let address = request.query.address
+
+  let query = ` select count(*)
+                from sns_names
+                where address = $1;`
+  let params = [address]
+
+  let res = await db_pool.query(query, params)
+
+  response.send({ error: null, result: res.rows })
+});
+
+app.get('/v1/sns/get_sns_of_address', async (request, response) => {
+  let address = request.query.address
+
+  let query = ` select inscription_id, inscription_number, "name" as sns_name
+                from sns_names
+                where address = $1;`
+  let params = [address]
 
   let res = await db_pool.query(query, params)
 

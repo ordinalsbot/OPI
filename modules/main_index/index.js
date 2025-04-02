@@ -50,6 +50,11 @@ if (ord_folder.length == 0) {
 if (ord_folder[ord_folder.length - 1] != '/') ord_folder += '/'
 var ord_datadir = process.env.ORD_DATADIR || "."
 var cookie_file = process.env.COOKIE_FILE || ""
+var db_cache_size = process.env.db_cache_size
+var db_cache_argument = ""
+if (db_cache_size) {
+  db_cache_argument = " --db-cache-size=" + db_cache_size
+}
 
 const network_type = process.env.NETWORK_TYPE || "mainnet"
 
@@ -74,6 +79,7 @@ if (network_type == "mainnet") {
   console.error("Unknown network type: " + network_type)
   process.exit(1)
 }
+console.log('init network_type:', network_type, 'network:', network, 'network_folder:', network_folder);
 const first_inscription_heights = {
   'mainnet': 767430,
   'testnet': 2413343,
@@ -212,8 +218,7 @@ async function main_index() {
     } else if (network_type == 'testnet4') {
       network_argument = " --testnet4"
     }
-    
-    let ord_index_cmd = ord_binary + network_argument + " --bitcoin-data-dir \"" + chain_folder + "\" --data-dir \"" + ord_datadir + "\"" + cookie_arg + " --height-limit " + (ord_end_block_height) + " " + rpc_argument + " index run"
+    let ord_index_cmd = ord_binary + network_argument + " --bitcoin-data-dir \"" + chain_folder + "\" --data-dir \"" + ord_datadir + "\"" + cookie_arg + " --height-limit " + (ord_end_block_height) + db_cache_argument + " " + rpc_argument + " index run"
 
     try {
       let version_string = execSync(ord_version_cmd).toString()
@@ -245,6 +250,7 @@ async function main_index() {
       lines.push(line)
     }
     let lines_index = fs.readFileSync(ord_folder + network_folder + "log_file_index.txt", "utf8").split('\n')
+    console.log("main_index lines: " + lines?.length + " index: " + lines_index?.length);
     if (lines_index.length == 1) {
       console.log("Nothing new, waiting!!")
       await delay(2)
@@ -253,6 +259,7 @@ async function main_index() {
 
     let current_height_q = await db_pool.query(`SELECT coalesce(max(block_height), -1) as max_height from block_hashes;`)
     let current_height = current_height_q.rows[0].max_height
+    console.log('current_height: ' + current_height)
 
     console.log("Checking for possible reorg")
     for (const l of lines_index) {
@@ -265,7 +272,7 @@ async function main_index() {
         console.warn("Block repeating, possible reorg!!")
         let blockhash = parts[3].trim()
         let blockhash_db_q = await db_pool.query("select block_hash from block_hashes where block_height = $1;", [block_height])
-        if (blockhash_db_q.rows[0].block_hash != blockhash) {
+        if (blockhash_db_q.rows.length > 0 && blockhash_db_q.rows[0].block_hash != blockhash) {
           let reorg_st_tm = +(new Date())
           console.error("Reorg detected at block_height " + block_height)
           await handle_reorg(block_height)
@@ -468,6 +475,7 @@ async function main_index() {
         }
       }
     }
+    console.log('triggering remaining promises', running_promises?.length);
     await Promise.all(running_promises)
     running_promises = []
 

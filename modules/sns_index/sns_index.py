@@ -9,6 +9,7 @@ import psycopg2
 import hashlib
 import json5
 import requests
+import threading
 
 ## global variables
 in_commit = False
@@ -298,6 +299,33 @@ def index_block(block_height, current_block_hash):
       #print("namespace: " + str(namespace) + " id: " + str(sns_id) + " inscr_num: " + str(inscr_num))
       block_events_str += get_ns_register_event_str(str(namespace), str(inscr_id)) + EVENT_SEPARATOR
   
+  # handle sns transfers with each block
+  cur_metaprotocol.execute('''SELECT ot.id, ot.inscription_id, ot.old_satpoint, ot.new_pkscript, ot.new_wallet, ot.sent_as_fee, oc."content", oc.content_type, onti.parent_id
+                            FROM ord_transfers ot
+                            LEFT JOIN ord_content oc ON ot.inscription_id = oc.inscription_id
+                            LEFT JOIN ord_number_to_id onti ON ot.inscription_id = onti.inscription_id
+                            WHERE ot.block_height = %s 
+                                AND onti.cursed_for_brc20 = false
+                                AND oc."content" is not null AND oc."content"->>'p'='brc-20'
+                            ORDER BY ot.id asc;''', (block_height,))
+  transfers = cur_metaprotocol.fetchall()
+  if len(transfers) == 0:
+    print("No transfers found for block " + str(block_height))
+
+  print("New transfers count: ", len(transfers))
+
+  # use this to update address for sns_names inscription_ids
+  for transfer in transfers:
+    tx_id, inscription_id, old_satpoint, new_pkScript, new_wallet, sent_as_fee, js, content_type, parent_id = transfer
+    if new_wallet is None: continue
+    if '\x00' in new_wallet: continue
+    if utf8len(new_wallet) > 2048: 
+      print("wallet is too long, skipping wallet: " + str(new_wallet))
+      continue
+    cur.execute('''update sns_names set address = %s where inscription_id = %s and exists (select 1 from sns_names WHERE inscription_id = %s);''', (new_wallet, inscription_id, inscription_id))
+    if cur.rowcount == 0: continue
+    # else: print("Updated address for inscription_id: " + str(inscription_id) + " to " + str(new_wallet))
+    
   update_event_hashes(block_height)
   # end of block
   cur.execute('''INSERT INTO sns_block_hashes (block_height, block_hash) VALUES (%s, %s);''', (block_height, current_block_hash))
@@ -362,6 +390,35 @@ def check_if_there_is_residue_from_last_run():
     print("Rolled back to " + str(current_block - 1))
     return
 
+def populate_sns_addresses():
+  cur.execute('''select inscription_id from sns_names where address is null limit 1;''')
+  try:
+    row = cur.fetchone()
+    if row is None: return
+    inscription_id = row[0]
+    if inscription_id is None: return
+    print("Checking address for inscription_id: " + str(inscription_id))
+
+    # get where this inscription is from ord_transfers
+    # select * from ord_transfers where inscription_id ='xxx' desc block_height limit 1;
+    cur.execute('''select new_wallet from ord_transfers where inscription_id = %s and new_wallet is not null order by block_height desc limit 1;''', (inscription_id,))
+    row = cur.fetchone()
+    if row is None: return
+    address = row[0]
+    if address is None: return
+    
+    print("Updating address for inscription_id: " + str(inscription_id) + " to " + str(address))
+    cur.execute('''update sns_names set address = %s where inscription_id = %s;''', (address, inscription_id))
+    conn.commit()
+  except:
+    print("cur.fetchone() failed.")
+
+def populate_sns_addresses_loop():
+  print("Waiting to start populate sns addresses...")
+  time.sleep(5)
+  print("Starting to populate sns addresses...")
+  while True:
+    populate_sns_addresses()
 
 cur.execute('select db_version from sns_names_indexer_version;')
 if cur.rowcount == 0:
@@ -416,6 +473,12 @@ def report_hashes(block_height):
 
 last_report_height = 0
 check_if_there_is_residue_from_last_run()
+
+# start background thread to populate sns addresses
+background_thread = threading.Thread(target=populate_sns_addresses_loop)
+background_thread.daemon = True
+background_thread.start()
+
 while True:
   check_if_there_is_residue_from_last_run()
   ## check if a new block is indexed

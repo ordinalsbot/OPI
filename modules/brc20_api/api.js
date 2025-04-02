@@ -64,6 +64,31 @@ app.get('/v1/brc20/db_version', async (request, response) => {
   }
 })
 
+// OB additions
+app.get('/v1/brc20/ticker_info', async (request, response) => {
+  try {
+    console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
+    if (!request.query.ticker) {
+      return response.status(400).send({ error: 'ticker is required', result: null })
+    }
+    let tick = request.query.ticker.toLowerCase() || ''
+    let query = ` select *
+                  from brc20_tickers
+                  where tick = $1;`
+    let params = [tick]
+
+    let res = await query_db(query, params)
+    if (res.rows.length == 0) {
+      response.status(400).send({ error: 'no ticker found', result: null })
+      return
+    }
+    response.send({ error: null, result: res.rows[0] })
+  } catch (err) {
+    console.log(err)
+    response.status(500).send({ error: 'internal error', result: null })
+  }
+});
+
 app.get('/v1/brc20/event_hash_version', async (request, response) => {
   try {
     console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
@@ -122,7 +147,14 @@ app.get('/v1/brc20/balance_on_block', async (request, response) => {
   try {
     console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
     let block_height = request.query.block_height
-    let pkscript = request.query.pkscript
+    let address = request.query.address || null
+    let pkscript = request.query.pkscript || null
+    if (!block_height) {
+      return response.status(400).send({ error: 'block_height is required', result: null })
+    }
+    if (!request.query.ticker) {
+      return response.status(400).send({ error: 'ticker is required', result: null })
+    }
     let tick = request.query.ticker.toLowerCase()
 
     let current_block_height = await get_block_height_of_db()
@@ -131,19 +163,27 @@ app.get('/v1/brc20/balance_on_block', async (request, response) => {
       return
     }
 
-    let query =  `select overall_balance, available_balance
-                  from brc20_historic_balances
-                  where block_height < $1
-                    and pkscript = $2
-                    and tick = $3
-                  order by id desc
-                  limit 1;`
-    let res = await query_db(query, [block_height, pkscript, tick])
+    let query =  `select distinct on (${pkscript ? 'pkscript' : 'wallet'}) 
+      overall_balance, available_balance, pkscript, wallet
+      from brc20_historic_balances
+      where block_height <= $1
+        and (${pkscript ? 'pkscript' : 'wallet'} = $2 or $2 is null)
+        and tick = $3
+      order by ${pkscript ? 'pkscript' : 'wallet'}, block_height desc, id DESC;`
+    let params = [block_height, pkscript || address, tick];
+    let res = await query_db(query, params)
     if (res.rows.length == 0) {
       response.status(400).send({ error: 'no balance found', result: null })
       return
     }
-    response.send({ error: null, result: res.rows[0] })
+
+    let rows = res.rows
+    // order rows using parseInt(overall_balance) desc
+    rows.sort((a, b) => parseInt(b.overall_balance) - parseInt(a.overall_balance))
+    // remove rows with parseInt(overall_balance) == 0
+    rows = rows.filter((row) => parseInt(row.overall_balance) != 0)
+
+    response.send({ error: null, result: rows })
   } catch (err) {
     console.log(err)
     response.status(500).send({ error: 'internal error', result: null })
@@ -195,7 +235,10 @@ app.get('/v1/brc20/get_current_balance_of_wallet', async (request, response) => 
     console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
     let address = request.query.address || ''
     let pkscript = request.query.pkscript || ''
-    let tick = request.query.ticker.toLowerCase()
+    let tick = request.query.ticker?.toLowerCase() || ''
+    if (!address && !pkscript && !tick) {
+      return response.status(400).send({ error: 'address or pkscript is required', result: null })
+    }
 
     let current_block_height = await get_block_height_of_db()
     let query = ` select overall_balance, available_balance
@@ -445,6 +488,302 @@ app.get('/v1/brc20/event', async (request, response) => {
       result.push(event)
     }
     response.send({ error: null, result: result })
+  } catch (err) {
+    console.log(err)
+    response.status(500).send({ error: 'internal error', result: null })
+  }
+});
+
+// New endpoint to get all BRC-20 tokens with pagination and filtering
+// there are no available tokens to mint
+const MINT_STATUS_COMPLETED_TEXT = 'completed';
+
+// less than 10% of the max supply remaining
+const MINT_STATUS_NEARLY_FINISHED_TEXT = 'nearly_finished';
+// Percentage threshold of max supply below which a token is considered nearly finished (e.g. 0.1 means 10% remaining)
+const MINT_FINISHED_THRESHOLD_PERCENTAGE = parseFloat(process.env.MINT_FINISHED_THRESHOLD_PERCENTAGE || '0.1');
+
+// most recently "deployed" tokens
+const MINT_STATUS_NEWEST_MINT_TEXT = 'newest_deploy';
+// Number of recent blocks considered for marking a token as a "newest mint"
+const NEWEST_MINT_BLOCKS = parseInt(process.env.NEWEST_MINT_BLOCKS || '100');
+
+// momentum - most minted in last 12 hours = 72 blocks + mempool
+const MINT_STATUS_MOMENTUM_MINT_TEXT = 'momentum';
+const MOMENTUM_MINT_BLOCKS = parseInt(process.env.MOMENTUM_MINT_BLOCKS || '72');
+
+/**
+ * GET /v1/brc20/tokens
+ * Returns an array of all BRC-20 tokens with optional filtering, pagination, and event counts, sorted by descending holder count.
+ *
+ * Query Parameters:
+ * @param {number} page - The page number for pagination (default: 1).
+ * @param {number} limit - The number of results per page (default: 10).
+ * @param {string} [ticker] - A keyword to filter tokens by their ticker (case-insensitive).
+ * @param {string} [mint_status] - The mint status filter:
+ *  - "completed": Tokens with no remaining supply.
+ *  - "nearly_finished": Tokens with less than 10% of supply remaining.
+ *  - "newest_deploy": Tokens deployed in the most recent blocks.
+ *  - "momentum": Tokens with the most minting activity in the last 12 hours.
+ * @param {boolean} [include_events] - If true, includes the count of "mint-inscribe" events for each token.
+ * @param {boolean} [include_mempool] - If true, includes the list of mempool counts for each token.
+ *
+ * Response:
+ * @returns {Object} JSON response with:
+ *  - {number} total - Total number of tokens matching the filters.
+ *  - {Array<Object>} result - The list of tokens, each containing:
+ *  - {string} tick - The token ticker.
+ *  - {number} max_supply - The maximum supply of the token.
+ *  - {number} remaining_supply - The remaining tokens to be minted.
+ *  - {number} limit_per_mint - Maximum tokens that can be minted per transaction.
+ *  - {number} block_height - Block height at which the token was deployed.
+ *  - {string} deploy_inscription_id - Unique ID of the token deployment.
+ *  - {boolean} is_self_mint - Whether the token has self-mint=true which means its a 5-byte ticker and it can not be fairly minted
+ *  - {number} holders - Count of unique wallet holders.
+ *  - {number} [mint_count] - (Optional) Count of "mint-inscribe" events.
+ *  - {number} [mempool_mint_count] - (Optional) Count of "mint" events in the mempool.
+ *  - {number} [mempool_deploy_count] - (Optional) Count of "deploy" events in the mempool.
+ */
+app.get('/v1/brc20/tokens', async (request, response) => {
+  try {
+    console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`);
+
+    let { page, limit, ticker, mint_status, include_events, include_mempool } = request.query;
+    
+    page = parseInt(page) || 1;
+    limit = parseInt(limit) || 10;
+    let offset = (page - 1) * limit;
+    include_events = include_events === 'true';
+
+    let whereClauses = [];
+    let params = [];
+
+    // do not include tickers with length 5
+    whereClauses.push("LENGTH(tick) < 5");
+    // I'm convinced all is_self_mint=true is 5-byte tickers
+    // confirmed with ddomo as well
+    whereClauses.push("is_self_mint = false");
+
+    // Use existing index `brc20_tickers_lower_tick_idx` for case-insensitive `ILIKE`
+    if (ticker) {
+      whereClauses.push("LOWER(tick) ILIKE $"+(params.length+1));
+      params.push(`%${ticker}%`);
+    }
+
+    let whereSQL, dataQuery, countQuery, totalTokens, countResult, dataResult, tokens;
+    // Filter by mint status
+    if (mint_status) {
+      if (mint_status === MINT_STATUS_COMPLETED_TEXT) {
+        whereClauses.push("remaining_supply = 0");
+      } else if (mint_status === MINT_STATUS_NEARLY_FINISHED_TEXT) {
+        whereClauses.push("remaining_supply / max_supply < $"+(params.length+1));
+        params.push(MINT_FINISHED_THRESHOLD_PERCENTAGE);
+        // do not include tokens with 0 remaining supply
+        whereClauses.push("remaining_supply::numeric / max_supply > 0");
+      } else if (mint_status === MINT_STATUS_NEWEST_MINT_TEXT) {
+        whereClauses.push("block_height >= (SELECT MAX(block_height) - $"+(params.length+1)+" FROM brc20_tickers)");
+        params.push(NEWEST_MINT_BLOCKS);
+
+        whereSQL = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+
+        // sort by block height descending
+        dataQuery = `
+          SELECT *
+          FROM brc20_tickers
+          ${whereSQL}
+          ORDER BY block_height DESC
+          LIMIT $${params.length+1} OFFSET $${params.length+2};
+        `;
+
+        params.push(limit, offset);
+        dataResult = await query_db(dataQuery, params);
+        tokens = dataResult.rows;
+        totalTokens = tokens.length;
+
+        // this is a specially crafted query, we return here
+        return response.send({
+          error: null,
+          total: totalTokens,
+          result: tokens
+        });
+      } else if (mint_status === MINT_STATUS_MOMENTUM_MINT_TEXT) {
+        whereClauses.push("block_height >= (SELECT MAX(block_height) - $"+(params.length+1)+" FROM brc20_tickers)");
+        params.push(MOMENTUM_MINT_BLOCKS);
+        // do not include tokens with 0 remaining supply
+        whereClauses.push("remaining_supply::numeric / max_supply > 0");
+
+        whereSQL = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+
+        // calculate momentum score = minted in last 72 blocks + mempool minted
+        dataQuery = `
+          WITH tickers_with_momentum AS (
+            SELECT tick,
+                  max_supply,
+                  remaining_supply,
+                  limit_per_mint,
+                  block_height,
+                  deploy_inscription_id,
+                  is_self_mint,
+                  (SELECT COUNT(DISTINCT wallet) 
+                      FROM brc20_current_balances 
+                    WHERE brc20_current_balances.tick = brc20_tickers.tick) AS holders,
+                  (
+                    (SELECT COUNT(*) 
+                        FROM brc20_events 
+                      WHERE event_type = 1 
+                        AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
+                        AND block_height >= (SELECT MAX(block_height) - 72 FROM brc20_block_hashes)
+                    ) +
+                    (SELECT COUNT(*) 
+                        FROM brc20_mempool_events 
+                      WHERE event_type = 1 
+                        AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
+                        AND block_height >= (SELECT MAX(block_height) - 72 FROM brc20_block_hashes)
+                    )
+                  ) AS momentum_score
+            FROM brc20_tickers
+            ${whereSQL}
+          )
+          SELECT *
+          FROM tickers_with_momentum
+          WHERE momentum_score > 0
+          ORDER BY momentum_score DESC
+          LIMIT $${params.length+1} OFFSET $${params.length+2};
+        `;
+
+        params.push(limit, offset);
+        dataResult = await query_db(dataQuery, params);
+        tokens = dataResult.rows;
+        totalTokens = tokens.length;
+
+        // this is a specially crafted query, we return here
+        return response.send({
+          error: null,
+          total: totalTokens,
+          result: tokens
+        });
+      }
+      console.log("mint_status", mint_status);
+      console.log("whereClauses", whereClauses);
+      console.log("params", params);
+    }
+
+    whereSQL = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+
+    // Query to get total count for pagination
+    countQuery = `SELECT COUNT(*) AS total FROM brc20_tickers ${whereSQL};`;
+    countResult = await query_db(countQuery, params);
+    totalTokens = countResult.rows[0].total;
+
+    // Query to get token data with pagination
+    dataQuery = `
+      SELECT tick, max_supply, remaining_supply, limit_per_mint, block_height, deploy_inscription_id, is_self_mint, 
+        (SELECT COUNT(DISTINCT wallet) FROM brc20_current_balances WHERE brc20_current_balances.tick = brc20_tickers.tick) AS holders
+      FROM brc20_tickers
+      ${whereSQL}
+      ORDER BY holders DESC
+      LIMIT $${params.length+1} OFFSET $${params.length+2};`;
+    
+    params.push(limit, offset);
+    dataResult = await query_db(dataQuery, params);
+    tokens = dataResult.rows;
+
+    // If include_events=true, fetch the mint-inscribe count
+    if (include_events && tokens.length > 0) {
+      let tickersList = tokens.map(t => t.tick);
+    
+      let eventsQuery = `
+        SELECT event->>'tick' AS tick, COUNT(*) AS mint_inscribes
+        FROM brc20_events
+        WHERE event_type = 1
+          AND event->>'tick' = ANY($1)
+        GROUP BY event->>'tick';
+      `;
+    
+      let eventsResult = await query_db(eventsQuery, [tickersList]);
+      let eventsMap = {};
+      eventsResult.rows.forEach(row => {
+        eventsMap[row.tick] = row.mint_inscribes;
+      });
+      tokens = tokens.map(t => ({
+        ...t,
+        mint_count: eventsMap[t.tick] || 0,
+      }));
+    } 
+
+    // If include_mempool=true, fetch the mempool events from brc20_mempool_events at current blockheight
+    if (include_mempool && tokens.length > 0) {
+      let mempoolQuery = `
+        SELECT *
+        FROM brc20_mempool_events
+        WHERE lower(event->>'tick') = ANY($1) AND block_height = $2
+        ORDER BY seen_at DESC;
+      `;
+      const current_block_height = await get_block_height_of_db();
+      let tickersList = tokens.map(t => t.tick);
+      let mempoolResult = await query_db(mempoolQuery, [tickersList, current_block_height]);
+      let mempoolMap = {};
+      mempoolResult.rows.forEach(row => {
+        // check event_type and increment deploy if 0, mint if 1
+        let event = row.event;
+        let event_type = row.event_type;
+        let tick = event.tick.toLowerCase();
+        if (event_type === 0) {
+          mempoolMap[tick] = mempoolMap[tick] || { deploy: 0, mint: 0 };
+          mempoolMap[tick].deploy++;
+        } else if (event_type === 1) {
+          mempoolMap[tick] = mempoolMap[tick] || { deploy: 0, mint: 0 };
+          mempoolMap[tick].mint++;
+        }
+      });
+      tokens = tokens.map(t => ({
+        ...t,
+        mempool_mint_count: mempoolMap[t.tick]?.mint || 0,
+        mempool_deploy_count: mempoolMap[t.tick]?.deploy || 0,
+      }));
+    }
+
+    response.send({
+      error: null,
+      total: totalTokens,
+      result: tokens
+    });
+
+  } catch (err) {
+    console.log(err);
+    response.status(500).send({ error: 'internal error', result: null });
+  }
+});
+
+// get all events with a specific inscription id
+app.get('/v1/brc20/mempool_events', async (request, response) => {
+  try {
+    console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
+    
+    let tick = request.query.ticker?.toLowerCase() || '';
+
+    let query;
+    let params = [];
+    
+    if (tick) {
+      query = `
+        SELECT *
+        FROM brc20_mempool_events
+        WHERE lower(event->>'tick') = $1
+        ORDER BY seen_at DESC;
+      `;
+      params.push(tick);
+    } else {
+      query = `
+        SELECT *
+        FROM brc20_mempool_events
+        ORDER BY seen_at DESC;
+      `;
+    }
+    
+    let res = await query_db(query, params);
+
+    response.send({ error: null, result: res.rows })
   } catch (err) {
     console.log(err)
     response.status(500).send({ error: 'internal error', result: null })
