@@ -781,8 +781,31 @@ def index_block(block_height, current_block_hash, block_timestamp: int, is_synce
     except KeyboardInterrupt:
       raise KeyboardInterrupt
     except: pass
-    content_type = content_type.split(';')[0]
-    if content_type != 'application/json' and content_type != 'text/plain': continue ## invalid inscription
+    content_type_base = content_type.split(';')[0]
+    if content_type != 'application/json' and content_type_base != 'text/plain': continue ## invalid inscription
+
+    if "p" not in js: continue ## invalid inscription
+    if js["p"] != 'brc-20' and js["p"] != 'brc20-prog' and js["p"] != 'brc20-module': continue ## invalid inscription
+
+    # Handle brc20-prog deploy and call inscriptions
+    if js["p"] == 'brc20-prog':
+      if not brc20_prog_client.is_enabled(): continue
+      if block_height < brc20_prog_first_inscription_height: continue
+      if "op" not in js: continue ## invalid inscription
+      if "d" not in js: continue ## invalid inscription
+      if js["op"] == 'deploy' and old_satpoint == '':
+        brc20_prog_deploy_inscribe(block_height, inscr_id, new_pkScript, js)
+      elif js["op"] == 'deploy' and old_satpoint != '':
+        if is_used_or_invalid(inscr_id): continue
+        brc20_prog_deploy_transfer(block_height, current_block_hash, block_timestamp, inscr_id, new_pkScript, js, byte_len)
+      elif js["op"] == 'call' and old_satpoint == '':
+        if "c" not in js and "i" not in js: continue
+        brc20_prog_call_inscribe(block_height, inscr_id, new_pkScript, js)
+      elif js["op"] == 'call' and old_satpoint != '':
+        if "c" not in js and "i" not in js: continue
+        if is_used_or_invalid(inscr_id): continue
+        brc20_prog_call_transfer(block_height, current_block_hash, block_timestamp, inscr_id, new_pkScript, js, byte_len)
+      continue
 
     if "p" not in js: continue ## invalid inscription
     if js["p"] != 'brc-20' and js["p"] != 'brc20-prog' and js["p"] != 'brc20-module': continue ## invalid inscription
