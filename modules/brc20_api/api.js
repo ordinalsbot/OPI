@@ -577,9 +577,9 @@ const MINT_STATUS_NEWEST_MINT_TEXT = 'newest_deploy';
 // Number of recent blocks considered for marking a token as a "newest mint"
 const NEWEST_MINT_BLOCKS = parseInt(process.env.NEWEST_MINT_BLOCKS || '100');
 
-// momentum - most minted in last 12 hours = 72 blocks + mempool
+// momentum - most minted in last 24 hours = 144 blocks + mempool
 const MINT_STATUS_MOMENTUM_MINT_TEXT = 'momentum';
-const MOMENTUM_MINT_BLOCKS = parseInt(process.env.MOMENTUM_MINT_BLOCKS || '72');
+const MOMENTUM_MINT_BLOCKS = parseInt(process.env.MOMENTUM_MINT_BLOCKS || '144');
 
 /**
  * GET /v1/brc20/tokens
@@ -597,6 +597,7 @@ const MOMENTUM_MINT_BLOCKS = parseInt(process.env.MOMENTUM_MINT_BLOCKS || '72');
  * @param {boolean} [include_events] - If true, includes the count of "mint-inscribe" events for each token.
  * @param {boolean} [include_mempool] - If true, includes the list of mempool counts for each token.
  *
+ * @param {number} [momentum_blocks] - (Optional) Number of blocks to consider for mint_status=momentum (default: 144).
  * Response:
  * @returns {Object} JSON response with:
  *  - {number} total - Total number of tokens matching the filters.
@@ -617,8 +618,12 @@ app.get('/v1/brc20/tokens', async (request, response) => {
   try {
     console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`);
 
-    let { page, limit, ticker, mint_status, include_events, include_mempool } = request.query;
+    let { page, limit, ticker, mint_status, include_events, include_mempool, momentum_blocks } = request.query;
     
+    momentum_blocks = parseInt(momentum_blocks) || MOMENTUM_MINT_BLOCKS;
+    momentum_blocks = Math.max(momentum_blocks, 1); // Ensure momentum_blocks is at least 1
+    momentum_blocks = Math.min(momentum_blocks, 1008); // Limit to a maximum of 1008 blocks (1 week)
+
     page = parseInt(page) || 1;
     limit = parseInt(limit) || 10;
     let offset = (page - 1) * limit;
@@ -677,13 +682,13 @@ app.get('/v1/brc20/tokens', async (request, response) => {
         });
       } else if (mint_status === MINT_STATUS_MOMENTUM_MINT_TEXT) {
         whereClauses.push("block_height >= (SELECT MAX(block_height) - $"+(params.length+1)+" FROM brc20_tickers)");
-        params.push(MOMENTUM_MINT_BLOCKS);
+        params.push(momentum_blocks);
         // do not include tokens with 0 remaining supply
         whereClauses.push("remaining_supply::numeric / max_supply > 0");
 
         whereSQL = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
 
-        // calculate momentum score = minted in last 72 blocks + mempool minted
+        // calculate momentum score = minted in last momentum_blocks blocks + mempool minted
         dataQuery = `
           WITH tickers_with_momentum AS (
             SELECT tick,
@@ -701,13 +706,13 @@ app.get('/v1/brc20/tokens', async (request, response) => {
                         FROM brc20_events 
                       WHERE event_type = 1 
                         AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
-                        AND block_height >= (SELECT MAX(block_height) - 72 FROM brc20_block_hashes)
+                        AND block_height >= (SELECT MAX(block_height) - CAST('${momentum_blocks}' AS int) FROM brc20_block_hashes)
                     ) +
                     (SELECT COUNT(*) 
                         FROM brc20_mempool_events 
                       WHERE event_type = 1 
                         AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
-                        AND block_height >= (SELECT MAX(block_height) - 72 FROM brc20_block_hashes)
+                        AND block_height >= (SELECT MAX(block_height) - CAST('${momentum_blocks}' AS int) FROM brc20_block_hashes)
                     )
                   ) AS momentum_score
             FROM brc20_tickers
