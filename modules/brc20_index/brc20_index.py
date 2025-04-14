@@ -13,9 +13,9 @@ import hashlib
 from brc20_prog.brc20_prog_client import BRC20ProgClient, brc20_prog_first_inscription_heights
 from brc20_prog.balance_server import BRC20BalanceServer
 
-if not os.path.isfile('.env'):
-  print(".env file not found, please run \"python3 reset_init.py\" first")
-  sys.exit(1)
+# if not os.path.isfile('.env'):
+#   print(".env file not found, please run \"python3 reset_init.py\" first")
+#   sys.exit(1)
 
 # BRC20 Prog globals
 brc20_prog_client: BRC20ProgClient = BRC20ProgClient()
@@ -57,6 +57,7 @@ report_url = os.getenv("REPORT_URL") or "https://api.opi.network/report_block"
 report_retries = int(os.getenv("REPORT_RETRIES") or "10")
 report_name = os.getenv("REPORT_NAME") or "opi_brc20_indexer"
 network_type = os.getenv("NETWORK_TYPE") or "mainnet"
+print("Starting BRC20 indexer with network type: " + network_type + " connected to db " + db_database)
 
 first_inscription_heights = {
   'mainnet': 767430,
