@@ -29,7 +29,10 @@ if init_env:
   REPORT_URL="https://api.opi.network/report_block"
   REPORT_RETRIES="10"
   REPORT_NAME="opi_brc20_index"
-  CREATE_EXTRA_TABLES="true"
+  BRC20_PROG_ENABLED="false"
+  BRC20_PROG_RPC_URL="http://localhost:18545"
+  BRC20_PROG_BALANCE_SERVER_URL="http://localhost:18546"
+
   print("Initialising .env file")
   print("leave blank to use default values")
   use_other_env = False
@@ -89,7 +92,7 @@ if init_env:
       DB_METAPROTOCOL_DATABASE = res
     res = stdiomask.getpass("Main Postgres DB password: ")
     DB_METAPROTOCOL_PASSWD = res
-    res = input("Network type (Default: mainnet) options: mainnet, testnet, signet, regtest: ")
+    res = input("Network type (Default: mainnet) options: mainnet, testnet, testnet4, signet, regtest: ")
     if res != '':
       NETWORK_TYPE = res
   res = input("Report to main indexer (Default: true): ")
@@ -109,9 +112,17 @@ if init_env:
         break
       else:
         print('Report name cannot be empty')
-  res = input("Create extra tables for faster queries (Default: true) set to true for creating brc20_current_balances and brc20_unused_tx_inscrs tables: ")
+  res = input("Enable BRC20 programmable module (Default: false): ")
   if res != '':
-    CREATE_EXTRA_TABLES = res
+    BRC20_PROG_ENABLED = res
+  if BRC20_PROG_ENABLED == 'true':
+    res = input("BRC20 programmable module RPC URL (Default: http://localhost:18545): ")
+    if res != '':
+      BRC20_PROG_RPC_URL = res
+    res = input("BRC20 programmable module balance server URL (Default: http://localhost:18546): ")
+    if res != '':
+      BRC20_PROG_BALANCE_SERVER_URL = res
+
   f = open('.env', 'w')
   f.write('DB_USER="' + DB_USER + '"\n')
   f.write('DB_HOST="' + DB_HOST + '"\n')
@@ -128,7 +139,9 @@ if init_env:
   f.write('REPORT_URL="' + REPORT_URL + '"\n')
   f.write('REPORT_RETRIES="' + REPORT_RETRIES + '"\n')
   f.write('REPORT_NAME="' + REPORT_NAME + '"\n')
-  f.write('CREATE_EXTRA_TABLES="' + CREATE_EXTRA_TABLES + '"\n')
+  f.write('BRC20_PROG_ENABLED="' + BRC20_PROG_ENABLED + '"\n')
+  f.write('BRC20_PROG_RPC_URL="' + BRC20_PROG_RPC_URL + '"\n')
+  f.write('BRC20_PROG_BALANCE_SERVER_URL="' + BRC20_PROG_BALANCE_SERVER_URL + '"\n')
   f.close()
 
 res = input("Are you sure you want to initialise/reset the brc20 database? (y/n) ")
@@ -142,8 +155,6 @@ db_host = os.getenv("DB_HOST") or "localhost"
 db_port = int(os.getenv("DB_PORT") or "5432")
 db_database = os.getenv("DB_DATABASE") or "postgres"
 db_password = os.getenv("DB_PASSWD")
-
-create_extra_tables = (os.getenv("CREATE_EXTRA_TABLES") or "false") == "true"
 
 ## connect to db
 conn = psycopg2.connect(
@@ -181,15 +192,14 @@ for sql in sqls:
   if sql.strip() != '':
     cur.execute(sql)
 
-if create_extra_tables:
-  sqls = open('db_reset_extra.sql', 'r').read().split(';')
-  for sql in sqls:
-    if sql.strip() != '':
-      cur.execute(sql)
-  sqls = open('db_init_extra.sql', 'r').read().split(';')
-  for sql in sqls:
-    if sql.strip() != '':
-      cur.execute(sql)
+sqls = open('db_reset_extra.sql', 'r').read().split(';')
+for sql in sqls:
+  if sql.strip() != '':
+    cur.execute(sql)
+sqls = open('db_init_extra.sql', 'r').read().split(';')
+for sql in sqls:
+  if sql.strip() != '':
+    cur.execute(sql)
 
 ## close db
 cur.close()

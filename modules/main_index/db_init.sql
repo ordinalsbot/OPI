@@ -31,6 +31,7 @@ CREATE TABLE public.ord_content (
 	inscription_id text NOT NULL,
 	"content" jsonb NULL,
 	text_content text NULL,
+	byte_len int4 NOT NULL,
 	content_type text NOT NULL,
 	metaprotocol text NULL,
 	block_height int4 NOT NULL,
@@ -43,6 +44,7 @@ CREATE TABLE public.block_hashes (
 	id bigserial NOT NULL,
 	block_height int4 NOT NULL,
 	block_hash text NOT NULL,
+	block_timestamp timestamptz NOT NULL,
 	CONSTRAINT block_hashes_pk PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX block_hashes_block_height_idx ON public.block_hashes USING btree (block_height);
@@ -90,4 +92,4 @@ CREATE TABLE public.ord_indexer_version (
 	db_version int4 NOT NULL,
 	CONSTRAINT ord_indexer_version_pk PRIMARY KEY (id)
 );
-INSERT INTO public.ord_indexer_version (indexer_version, db_version) VALUES ('OPI V0.4.0', 6);
+INSERT INTO public.ord_indexer_version (indexer_version, db_version) VALUES ('OPI V0.4.0', 7);

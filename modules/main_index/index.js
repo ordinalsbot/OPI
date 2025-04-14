@@ -12,6 +12,11 @@ const process = require('process');
 const { execSync } = require("child_process");
 const readline = require('readline');
 
+var sigint_received = false;
+process.on('SIGINT', function() {
+  sigint_received = true;
+});
+
 bitcoin.initEccLib(ecc)
 
 console.log("VERSION V0.3.2")
@@ -61,8 +66,11 @@ if (network_type == "mainnet") {
 } else if (network_type == "testnet") {
   network = bitcoin.networks.testnet
   network_folder = "testnet3/"
-} else if (network_type == "signet") {
+} else if (network_type == "testnet4") {
   network = bitcoin.networks.testnet
+  network_folder = "testnet4/"
+} else if (network_type == "signet") {
+  network = bitcoin.networks.testnet // signet is not supported by bitcoinjs-lib but wallet_addr calculation is the same as testnet
   network_folder = "signet/"
 } else if (network_type == "regtest") {
   network = bitcoin.networks.regtest
@@ -75,17 +83,18 @@ console.log('init network_type:', network_type, 'network:', network, 'network_fo
 const first_inscription_heights = {
   'mainnet': 767430,
   'testnet': 2413343,
+  'testnet4': 0,
   'signet': 112402,
   'regtest': 0,
 }
 const first_inscription_height = first_inscription_heights[network_type]
 const fast_index_below = first_inscription_height + 7000
 
-const DB_VERSION = 6
+const DB_VERSION = 7
 const RECOVERABLE_DB_VERSIONS = []
 // eslint-disable-next-line no-unused-vars
 const INDEXER_VERSION = 'OPI V0.4.0'
-const ORD_VERSION = 'opi-ord 0.14.0-4'
+const ORD_VERSION = 'opi-ord 0.14.0-5'
 
 function delay(sec) {
   return new Promise(resolve => setTimeout(resolve, sec * 1000));
@@ -152,11 +161,9 @@ async function main_index() {
   await check_db()
   await check_db_max_transfer_cnts()
 
-  let first = true;
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    if (first) first = false
-    else await delay(2)
+    if (sigint_received) break;
 
     let start_tm = +(new Date())
 
@@ -180,6 +187,10 @@ async function main_index() {
     if (ord_last_block_height < fast_index_below) { // a random point where blocks start to get more inscription
       ord_end_block_height = ord_last_block_height + 1000
     }
+    if (ord_end_block_height > 59700) {
+      ord_end_block_height = ord_last_block_height + 10
+    }
+    ord_end_block_height = Math.ceil(ord_end_block_height / 10.0) * 10
 
     let cookie_arg = cookie_file ? ` --cookie-file=${cookie_file} ` : ""
 
@@ -204,6 +215,8 @@ async function main_index() {
       network_argument = " --regtest"
     } else if (network_type == 'testnet') {
       network_argument = " --testnet"
+    } else if (network_type == 'testnet4') {
+      network_argument = " --testnet4"
     }
     let ord_index_cmd = ord_binary + network_argument + " --bitcoin-data-dir \"" + chain_folder + "\" --data-dir \"" + ord_datadir + "\"" + cookie_arg + " --height-limit " + (ord_end_block_height) + db_cache_argument + " " + rpc_argument + " index run"
 
@@ -240,6 +253,7 @@ async function main_index() {
     console.log("main_index lines: " + lines?.length + " index: " + lines_index?.length);
     if (lines_index.length == 1) {
       console.log("Nothing new, waiting!!")
+      await delay(2)
       continue
     }
 
@@ -353,8 +367,8 @@ async function main_index() {
 
     let sql_query_insert_ord_number_to_id = `INSERT into ord_number_to_id (inscription_number, inscription_id, cursed_for_brc20, parent_id, block_height) values ($1, $2, $3, $4, $5);`
     let sql_query_insert_transfer = `INSERT into ord_transfers (id, inscription_id, block_height, old_satpoint, new_satpoint, new_pkScript, new_wallet, sent_as_fee, new_output_value) values ($1, $2, $3, $4, $5, $6, $7, $8, $9);`
-    let sql_query_insert_content = `INSERT into ord_content (inscription_id, content, content_type, metaprotocol, block_height) values ($1, $2, $3, $4, $5);`
-    let sql_query_insert_text_content = `INSERT into ord_content (inscription_id, text_content, content_type, metaprotocol, block_height) values ($1, $2, $3, $4, $5);`
+    let sql_query_insert_content = `INSERT into ord_content (inscription_id, content, byte_len, content_type, metaprotocol, block_height) values ($1, $2, $3, $4, $5, $6);`
+    let sql_query_insert_text_content = `INSERT into ord_content (inscription_id, text_content, byte_len, content_type, metaprotocol, block_height) values ($1, $2, $3, $4, $5, $6);`
     
     let ord_sql_query_count = 0
     let new_inscription_count = 0
@@ -444,17 +458,17 @@ async function main_index() {
             let content = parts.slice(8).join(';')
             if (parts[5] == 'true') { // JSON
               if (!content.includes('\\u0000')) {
-                running_promises.push(execute_on_db(sql_query_insert_content, [parts[4], content, parts[6], parts[7], block_height]))
+                running_promises.push(execute_on_db(sql_query_insert_content, [parts[4], content, Buffer.byteLength(content, 'utf8'), parts[6], parts[7], block_height]))
                 ord_sql_query_count += 1
               } else {
-                running_promises.push(execute_on_db(sql_query_insert_text_content, [parts[4], content, parts[6], parts[7], block_height]))
+                running_promises.push(execute_on_db(sql_query_insert_text_content, [parts[4], content, Buffer.byteLength(content, 'utf8'), parts[6], parts[7], block_height]))
                 ord_sql_query_count += 1
                 save_error_log("--------------------------------")
                 save_error_log("Error parsing JSON: " + content)
                 save_error_log("On inscription: " + parts[4])
               }
             } else {
-              running_promises.push(execute_on_db(sql_query_insert_text_content, [parts[4], content, parts[6], parts[7], block_height]))
+              running_promises.push(execute_on_db(sql_query_insert_text_content, [parts[4], content, Buffer.byteLength(content, 'utf8'), parts[6], parts[7], block_height]))
               ord_sql_query_count += 1
             }
           }
@@ -475,7 +489,8 @@ async function main_index() {
       let block_height = parseInt(parts[1])
       if (block_height < first_inscription_height) { continue }
       let blockhash = parts[3].trim()
-      await db_pool.query(`INSERT into block_hashes (block_height, block_hash) values ($1, $2) ON CONFLICT (block_height) DO NOTHING;`, [block_height, blockhash])
+      let block_timestamp = new Date(parseInt(parts[4]) * 1000)
+      await db_pool.query(`INSERT into block_hashes (block_height, block_hash, block_timestamp) values ($1, $2, $3) ON CONFLICT (block_height) DO NOTHING;`, [block_height, blockhash, block_timestamp])
     }
     
     let ord_sql_tm = +(new Date()) - ord_sql_st_tm
