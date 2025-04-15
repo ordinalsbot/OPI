@@ -612,13 +612,12 @@ app.get('/v1/brc20/tokens', async (request, response) => {
           result: tokens
         });
       } else if (mint_status === MINT_STATUS_MOMENTUM_MINT_TEXT) {
-        whereClauses.push("block_height >= (SELECT MAX(block_height) - $"+(params.length+1)+" FROM brc20_tickers)");
-        params.push(momentum_blocks);
         // do not include tokens with 0 remaining supply
         whereClauses.push("remaining_supply::numeric / max_supply > 0");
 
         whereSQL = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
-
+      
+        // uncomment to enable pagination
         // calculate momentum score = minted in last momentum_blocks blocks + mempool minted
         dataQuery = `
           WITH tickers_with_momentum AS (
@@ -658,6 +657,43 @@ app.get('/v1/brc20/tokens', async (request, response) => {
 
         params.push(limit, offset);
         dataResult = await query_db(dataQuery, params);
+
+        // uncomment to disable pagination
+        // const dataQueryWithoutPagination = `
+        //   WITH tickers_with_momentum AS (
+        //     SELECT tick,
+        //           max_supply,
+        //           remaining_supply,
+        //           limit_per_mint,
+        //           block_height,
+        //           deploy_inscription_id,
+        //           is_self_mint,
+        //           (SELECT COUNT(DISTINCT wallet) 
+        //               FROM brc20_current_balances 
+        //             WHERE brc20_current_balances.tick = brc20_tickers.tick) AS holders,
+        //           (
+        //             (SELECT COUNT(*) 
+        //                 FROM brc20_events 
+        //               WHERE event_type = 1 
+        //                 AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
+        //                 AND block_height >= (SELECT MAX(block_height) - 144 FROM brc20_block_hashes)
+        //             ) +
+        //             (SELECT COUNT(*) 
+        //                 FROM brc20_mempool_events 
+        //               WHERE event_type = 1 
+        //                 AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
+        //                 AND block_height >= (SELECT MAX(block_height) - 144 FROM brc20_block_hashes)
+        //             )
+        //           ) AS momentum_score
+        //     FROM brc20_tickers
+        //     ${whereSQL}
+        //   )
+        //   SELECT *
+        //   FROM tickers_with_momentum
+        //   WHERE momentum_score > 0; 
+        // `;
+        // dataResult = await query_db(dataQueryWithoutPagination, params);
+
         tokens = dataResult.rows;
         totalTokens = tokens.length;
 
