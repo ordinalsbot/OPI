@@ -2,11 +2,17 @@
 
 import os
 import requests
+from requests import auth
 from typing import Dict
 
 brc20_prog_enabled = (os.getenv("BRC20_PROG_ENABLED") or "false") == "true"
 brc20_prog_rpc_url = os.getenv("BRC20_PROG_RPC_URL") or "http://localhost:18545"
 network_type = os.getenv("NETWORK_TYPE") or "mainnet"
+
+brc20_prog_auth = auth.HTTPBasicAuth(
+    os.getenv("BRC20_PROG_RPC_SERVER_USER") or "user",
+    os.getenv("BRC20_PROG_RPC_SERVER_PASSWORD") or "password",
+)
 
 """
   The first block height where BRC20 Prog inscriptions can be added to the blockchain
@@ -41,6 +47,7 @@ def check_brc20_prog_inscriptions_enabled(current_block_height):
 def jsonrpc_call(method: str, params: Dict):
     response = requests.post(
         brc20_prog_rpc_url,
+        auth=brc20_prog_auth,
         json={
             "jsonrpc": "2.0",
             "method": method,
@@ -251,10 +258,9 @@ class BRC20ProgClient:
         if "error" in tx_result:
             raise Exception(tx_result["error"])
 
-        if tx_result["result"]["status"] == "0x0":
-            print("Transaction failed")
+        if tx_result["result"]: # Transaction is executed, increase the transaction index
+            self.current_block_tx_idx += 1
 
-        self.current_block_tx_idx += 1
         return tx_result["result"]
 
     def mine_blocks(self, block_count: int):
