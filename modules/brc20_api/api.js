@@ -229,6 +229,71 @@ app.get('/v1/brc20/activity_on_block', async (request, response) => {
   }
 });
 
+app.get('/v1/brc20/get_prog_balance', async (request, response) => {
+  try {
+    console.log(`${request.protocol}://${request.get('host')}${request.originalUrl}`)
+
+    const rawScript = request.query.pkscript
+    const rawTicker = request.query.ticker
+
+    // 1) both params must be present
+    if (rawScript === undefined || rawTicker === undefined) {
+      return response
+        .status(400)
+        .send({ error: 'Missing parameters', result: null })
+    }
+
+    // 2) exactly one of each (Express would give an array if repeated)
+    if (Array.isArray(rawScript) || Array.isArray(rawTicker)) {
+      return response
+        .status(400)
+        .send({ error: 'Invalid parameters', result: null })
+    }
+
+    // 3) normalize + strip optional 0x
+    const pkscript = rawScript.toLowerCase().replace(/^0x/, '').trim()
+    let   tick   = rawTicker.toLowerCase().replace(/^0x/, '').trim()
+
+    // 4) non‑empty check
+    if (!pkscript || !tick) {
+      return response
+        .status(400)
+        .send({ error: 'Invalid parameters', result: null })
+    }
+
+    // 5) valid hex for pkscript?
+    if (!/^[0-9a-f]+$/i.test(pkscript)) {
+      return response
+        .status(400)
+        .send({ error: 'Invalid pkscript', result: null })
+    }
+
+    // 6) decode ticker from hex → utf8
+    try {
+      tick = Buffer.from(tick, 'hex').toString('utf8').toLowerCase()
+    } catch {
+      return response
+        .status(400)
+        .send({ error: 'Invalid ticker', result: null })
+    }
+
+    // let current_block_height = await get_block_height_of_db()
+    let query = ` select overall_balance, available_balance
+                  from brc20_current_balances
+                  where pkscript = $1
+                    and tick = $2
+                  order by block_height desc
+                  limit 1;`
+    let params = [pkscript, tick]
+
+    let res = await query_db(query, params)
+    let balance = res.rows[0]?.result?.available_balance || 0
+    response.status(200).send(balance.toString())
+  } catch (err) {
+    console.log(err)
+    response.status(500).send({ error: 'internal error', result: null })
+  }
+});
 
 app.get('/v1/brc20/get_current_balance_of_wallet', async (request, response) => {
   try {
@@ -832,3 +897,4 @@ app.get('/v1/brc20/mempool_events', async (request, response) => {
 });
 
 app.listen(api_port, api_host);
+console.log('BRC20 API listening on ' + api_host + ':' + api_port);
