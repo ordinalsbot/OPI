@@ -1483,6 +1483,7 @@ last_report_height = 0
 
 # initialise genesis on brc20_prog
 if brc20_prog_client.is_enabled():
+  print("brc20_prog client is enabled...")
   if brc20_prog_client.version() != BRC20_PROG_VERSION:
     print("BRC20 Prog version mismatch!! Required: " + str(BRC20_PROG_VERSION) + " Found: " + str(brc20_prog_client.version()))
     sys.exit(1)
@@ -1545,6 +1546,7 @@ while True:
     continue
   try:
     if current_block == brc20_prog_first_inscription_height:
+      print("initialising genesis on brc20_prog")
       cur_metaprotocol.execute('''select block_hash, block_timestamp  from block_hashes where block_height = %s;''', (brc20_prog_first_inscription_height - 1,))
       prog_genesis_block_hash, prog_genesis_timestamp = cur_metaprotocol.fetchone()
       brc20_prog_client.initialise(prog_genesis_block_hash, int(prog_genesis_timestamp.timestamp()), brc20_prog_first_inscription_height - 1),

@@ -26,7 +26,7 @@ brc20_prog_first_inscription_heights = {
     "mainnet": 767431,  # TODO: Update this value to the correct block height before launching on mainnet
     "testnet": 2413344,  # TODO: Update this value to the correct block height before launching on testnet
     "testnet4": 2,  # TODO: Update this value to the correct block height before launching on testnet4
-    "signet": 230000,  # TODO: Update this value to the correct block height before launching on signet
+    "signet": 240000,  # TODO: Update this value to the correct block height before launching on signet
     "regtest": 2,  # TODO: Update this value to the correct block height before launching on regtest
 }
 
