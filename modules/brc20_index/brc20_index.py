@@ -533,6 +533,7 @@ def transfer_transfer_normal(block_height, block_hash, inscription_id, spent_pkS
   brc20_historic_balances_insert_cache.append((spent_pkScript, spent_wallet, tick, last_balance["overall_balance"], last_balance["available_balance"], block_height, -1 * event_id)) ## negated to make a unique event_id
   
   if spent_pkScript == BRC20_PROG_OP_RETURN_PKSCRIPT:
+    print("event: brc20_prog_client.deposit")
     brc20_prog_client.deposit(
       to_pkscript=source_pkScript,
       ticker=tick,
@@ -602,6 +603,7 @@ def brc20_prog_deploy_transfer(block_height, block_hash, block_timestamp, inscri
     print("Invalid spent_pkScript for deploy transfer")
     return
 
+  print("event: brc20_prog_client.deploy")
   brc20_prog_client.deploy(
     from_pkscript=inscribe_event["source_pkScript"],
     data=content["d"],
@@ -803,6 +805,7 @@ def index_block(block_height, current_block_hash, block_timestamp: int, is_synce
       if block_height < brc20_prog_first_inscription_height: continue
       if "op" not in js: continue ## invalid inscription
       if "d" not in js: continue ## invalid inscription
+      print("found a potentially valid brc20 prog inscription" + str(js))
       if js["op"] == 'deploy' and old_satpoint == '':
         brc20_prog_deploy_inscribe(block_height, inscr_id, new_pkScript, js)
       elif js["op"] == 'deploy' and old_satpoint != '':
@@ -1504,11 +1507,13 @@ if brc20_prog_client.is_enabled():
 
   if brc20_prog_client.get_block_height() == 0:
     # Initial blocks are not indexed, so we need to mine the first blocks in brc20_prog
+    print("Mining initial blocks...")
     brc20_prog_client.mine_blocks(brc20_prog_first_inscription_height - 1)
 
   cur_metaprotocol.execute('''select block_hash, block_timestamp  from block_hashes where block_height = %s;''', (brc20_prog_first_inscription_height - 1,))
   if cur_metaprotocol.rowcount != 0:
     current_block_hash, block_timestamp = cur_metaprotocol.fetchone()
+    print("Initialising genesis on brc20_prog")
     brc20_prog_client.initialise(current_block_hash, int(block_timestamp.timestamp()), brc20_prog_first_inscription_height - 1)
   
   brc20_prog_client.commit_to_database()
@@ -1559,21 +1564,23 @@ while True:
       report_hashes(current_block)
       last_report_height = current_block
   except KeyboardInterrupt:
+    print("KeyboardInterrupt detected, stopping...")
     brc20_prog_client.clear_caches()
     if brc20_balance_server:
       brc20_balance_server.stop()
     traceback.print_exc()
     if in_commit: ## rollback commit if any
-      print("rolling back")
+      print("rolling back 1")
       cur.execute('''ROLLBACK;''')
       in_commit = False
     print("Exiting...")
     sys.exit(1)
   except:
+    print("Error while indexing block ")
     brc20_prog_client.clear_caches()
     traceback.print_exc()
     if in_commit: ## rollback commit if any
-      print("rolling back")
+      print("rolling back 2")
       cur.execute('''ROLLBACK;''')
       in_commit = False
     reset_caches()
