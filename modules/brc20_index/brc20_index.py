@@ -808,7 +808,7 @@ def index_block(block_height, current_block_hash, block_timestamp: int, is_synce
       if block_height < brc20_prog_first_inscription_height: continue
       if "op" not in js: continue ## invalid inscription
       if "d" not in js: continue ## invalid inscription
-      print("found a potentially valid brc20 prog inscription" + str(js))
+      # print("found a potentially valid brc20 prog inscription" + str(js))
       if (js["op"] == 'deploy' or js["op"] == 'd'):
         if old_satpoint == '':
           brc20_prog_deploy_inscribe(block_height, inscr_id, new_pkScript, js)
