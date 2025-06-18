@@ -5,7 +5,7 @@ name: Build, Push
 
 on:
   push:
-    branches: [ "dev", "main" ]
+    branches: [ "dev", "main", "runes" ]
 
 jobs:
   build:

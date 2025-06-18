@@ -3,7 +3,7 @@ FROM rust:1.70.0-bullseye AS builder
 WORKDIR /ord
 
 # Copy the ord source code
-COPY ord .
+COPY modules/runes-index/ord-runes .
 
 RUN cargo build --release
 
@@ -24,10 +24,8 @@ RUN apt update && apt install -y python3-pip postgresql-client procps pbzip2 vim
 COPY . .
 
 # Install node deps
-RUN cd modules/main_index && npm install \
-    && cd ../brc20_api && npm install \
-    && cd ../bitmap_api && npm install \
-    && cd ../sns_api && npm install
+RUN cd modules/runes_index && npm install \
+    && cd ../runes_api && npm install
 
 # Bundle ord binary
 COPY --from=builder /ord/target/release/ord /bin/ord
