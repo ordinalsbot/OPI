@@ -3,7 +3,7 @@ FROM rust:1.70.0-bullseye AS builder
 WORKDIR /ord
 
 # Copy the ord source code
-COPY modules/runes-index/ord-runes .
+COPY modules/runes_index/ord-runes .
 
 RUN cargo build --release
 
