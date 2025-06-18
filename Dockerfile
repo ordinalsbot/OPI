@@ -1,4 +1,4 @@
-FROM rust:1.70.0-bullseye AS builder
+FROM rust:1.76.0-bullseye AS builder
 
 WORKDIR /ord
 
