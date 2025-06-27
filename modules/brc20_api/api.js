@@ -301,30 +301,42 @@ app.get('/v1/brc20/get_current_balance_of_wallet', async (request, response) => 
     let address = request.query.address || ''
     let pkscript = request.query.pkscript || ''
     let tick = request.query.ticker?.toLowerCase() || ''
-    if (!address && !pkscript && !tick) {
+    if (!address && !pkscript) {
       return response.status(400).send({ error: 'address or pkscript is required', result: null })
     }
 
     let current_block_height = await get_block_height_of_db()
-    let query = ` select overall_balance, available_balance
-                  from brc20_current_balances
-                  where pkscript = $1
-                    and tick = $2
-                  limit 1;`
-    let params = [pkscript, tick]
-    if (address != '') {
-      query = query.replace('pkscript', 'wallet')
-      params = [address, tick]
+
+    // ticker is optional
+    let baseColumn = address !== '' ? 'wallet' : 'pkscript'
+    let baseValue = address !== '' ? address : pkscript
+
+    let query = `SELECT tick, overall_balance, available_balance
+                 FROM brc20_current_balances
+                 WHERE ${baseColumn} = $1`
+    let params = [baseValue]
+
+    if (tick !== '') {
+      query += ` AND tick = $2`
+      params.push(tick)
     }
+
+    query += ` LIMIT 1;`
 
     let res = await query_db(query, params)
     if (res.rows.length == 0) {
       response.status(400).send({ error: 'no balance found', result: null })
       return
     }
-    let balance = res.rows[0]
 
-    balance.block_height = current_block_height
+    // add current block height to each row
+    let balance = res.rows.map(row => {
+      return {
+        ...row,
+        block_height: current_block_height
+      }
+    })
+
     response.send({ error: null, result: balance })
   } catch (err) {
     console.log(err)
