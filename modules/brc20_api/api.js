@@ -641,7 +641,7 @@ app.get('/v1/brc20/tokens', async (request, response) => {
     let params = [];
 
     // do not include tickers with length 5
-    whereClauses.push("LENGTH(tick) < 5");
+    whereClauses.push("LENGTH(brc20_tickers.tick) < 5");
     // I'm convinced all is_self_mint=true is 5-byte tickers
     // confirmed with ddomo as well
     whereClauses.push("is_self_mint = false");
@@ -694,42 +694,93 @@ app.get('/v1/brc20/tokens', async (request, response) => {
 
         whereSQL = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
       
-        // uncomment to enable pagination
-        // calculate momentum score = minted in last momentum_blocks blocks + mempool minted
+        // // uncomment to enable pagination
+        // // calculate momentum score = minted in last momentum_blocks blocks + mempool minted
+        // dataQuery = `
+        //   WITH tickers_with_momentum AS (
+        //     SELECT tick,
+        //           max_supply,
+        //           remaining_supply,
+        //           limit_per_mint,
+        //           block_height,
+        //           deploy_inscription_id,
+        //           is_self_mint,
+        //           (SELECT COUNT(DISTINCT wallet) 
+        //               FROM brc20_current_balances 
+        //             WHERE brc20_current_balances.tick = brc20_tickers.tick) AS holders,
+        //           (
+        //             (SELECT COUNT(*) 
+        //                 FROM brc20_events 
+        //               WHERE event_type = 1 
+        //                 AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
+        //                 AND block_height >= (SELECT MAX(block_height) - CAST('${momentum_blocks}' AS int) FROM brc20_block_hashes)
+        //             ) +
+        //             (SELECT COUNT(*) 
+        //                 FROM brc20_mempool_events 
+        //               WHERE event_type = 1 
+        //                 AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
+        //                 AND block_height >= (SELECT MAX(block_height) - CAST('${momentum_blocks}' AS int) FROM brc20_block_hashes)
+        //                 AND confirmed_height IS NULL
+        //             )
+        //           ) AS momentum_score
+        //     FROM brc20_tickers
+        //     ${whereSQL}
+        //   )
+        //   SELECT *
+        //   FROM tickers_with_momentum
+        //   WHERE momentum_score > 0
+        //   ORDER BY momentum_score DESC
+        //   LIMIT $${params.length+1} OFFSET $${params.length+2};
+        // `;
+
+        // optimized as per chatgpt :(
         dataQuery = `
-          WITH tickers_with_momentum AS (
-            SELECT tick,
-                  max_supply,
-                  remaining_supply,
-                  limit_per_mint,
-                  block_height,
-                  deploy_inscription_id,
-                  is_self_mint,
-                  (SELECT COUNT(DISTINCT wallet) 
-                      FROM brc20_current_balances 
-                    WHERE brc20_current_balances.tick = brc20_tickers.tick) AS holders,
-                  (
-                    (SELECT COUNT(*) 
-                        FROM brc20_events 
-                      WHERE event_type = 1 
-                        AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
-                        AND block_height >= (SELECT MAX(block_height) - CAST('${momentum_blocks}' AS int) FROM brc20_block_hashes)
-                    ) +
-                    (SELECT COUNT(*) 
-                        FROM brc20_mempool_events 
-                      WHERE event_type = 1 
-                        AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
-                        AND block_height >= (SELECT MAX(block_height) - CAST('${momentum_blocks}' AS int) FROM brc20_block_hashes)
-                    )
-                  ) AS momentum_score
-            FROM brc20_tickers
-            ${whereSQL}
-          )
+          WITH
+            max_block_height AS (
+              SELECT MAX(block_height) - CAST('${momentum_blocks}' AS int) AS max_height
+              FROM brc20_block_hashes
+            ),
+            events_count AS (
+              SELECT
+                LOWER(event->>'tick') AS tick,
+                COUNT(*) AS event_count
+              FROM brc20_events
+              WHERE event_type = 1
+              GROUP BY LOWER(event->>'tick')
+            ),
+            mempool_events_count AS (
+              SELECT
+                LOWER(event->>'tick') AS tick,
+                COUNT(*) AS mempool_event_count
+              FROM brc20_mempool_events
+              WHERE event_type = 1 AND confirmed_height IS NULL
+              GROUP BY LOWER(event->>'tick')
+            ),
+            tickers_with_momentum AS (
+              SELECT
+                brc20_tickers.tick,  -- Explicitly reference tick from brc20_tickers
+                max_supply,
+                remaining_supply,
+                limit_per_mint,
+                block_height,
+                deploy_inscription_id,
+                is_self_mint,
+                (SELECT COUNT(DISTINCT wallet)
+                FROM brc20_current_balances 
+                WHERE brc20_current_balances.tick = brc20_tickers.tick) AS holders,
+                COALESCE(e.event_count, 0) + COALESCE(m.mempool_event_count, 0) AS momentum_score
+              FROM brc20_tickers
+              LEFT JOIN events_count e ON LOWER(brc20_tickers.tick) = e.tick
+              LEFT JOIN mempool_events_count m ON LOWER(brc20_tickers.tick) = m.tick
+              CROSS JOIN max_block_height
+              ${whereSQL}
+            )
+          
           SELECT *
           FROM tickers_with_momentum
           WHERE momentum_score > 0
           ORDER BY momentum_score DESC
-          LIMIT $${params.length+1} OFFSET $${params.length+2};
+          LIMIT $${params.length + 1} OFFSET $${params.length + 2};
         `;
 
         params.push(limit, offset);
@@ -787,6 +838,7 @@ app.get('/v1/brc20/tokens', async (request, response) => {
     }
 
     whereSQL = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+    console.log("whereSQL", whereSQL);
 
     // Query to get total count for pagination
     countQuery = `SELECT COUNT(*) AS total FROM brc20_tickers ${whereSQL};`;
