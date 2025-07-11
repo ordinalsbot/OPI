@@ -1542,8 +1542,8 @@ while True:
     print("Waiting for new blocks...")
     time.sleep(5)
     continue
-  
-  print("Processing block %s" % current_block)
+
+  print("Processing block %s at %s" % (current_block, time.strftime("%Y-%m-%d %H:%M:%S")))
   cur_metaprotocol.execute('select block_hash, block_timestamp from block_hashes where block_height = %s;', (current_block,))
   current_block_hash, block_timestamp = cur_metaprotocol.fetchone()
   reorg_height = check_for_reorg()
@@ -1566,6 +1566,7 @@ while True:
     if max_block_of_metaprotocol_db - current_block < 10 or current_block - last_report_height > 100: ## do not report if there are more than 10 blocks to index
       report_hashes(current_block)
       last_report_height = current_block
+    print("Block %s indexed successfully at %s" % (current_block, time.strftime("%Y-%m-%d %H:%M:%S")))
   except KeyboardInterrupt:
     print("KeyboardInterrupt detected, stopping...")
     brc20_prog_client.clear_caches()
