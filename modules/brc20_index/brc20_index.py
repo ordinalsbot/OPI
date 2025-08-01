@@ -1,15 +1,25 @@
 # pip install python-dotenv
 # pip install psycopg2-binary
 
-import os, sys, requests
+## load env variables
 from dotenv import load_dotenv
+load_dotenv()
+
+import os, sys, requests
 import traceback, time, codecs, json
 import psycopg2
 import hashlib
 
+from brc20_prog.brc20_prog_client import BRC20ProgClient, brc20_prog_first_inscription_heights
+from brc20_prog.balance_server import BRC20BalanceServer
+
 # if not os.path.isfile('.env'):
 #   print(".env file not found, please run \"python3 reset_init.py\" first")
 #   sys.exit(1)
+
+# BRC20 Prog globals
+brc20_prog_client: BRC20ProgClient = BRC20ProgClient()
+brc20_balance_server: BRC20BalanceServer = None
 
 ## global variables
 ticks = {}
@@ -17,9 +27,11 @@ in_commit = False
 block_events_str = ""
 EVENT_SEPARATOR = "|"
 INDEXER_VERSION = "opi-brc20-full-node v0.4.1"
+BRC20_PROG_VERSION = "0.4.1"
 RECOVERABLE_DB_VERSIONS = [ 4 ]
 DB_VERSION = 5
 EVENT_HASH_VERSION = 2
+BRC20_PROG_OP_RETURN_PKSCRIPT = "6a09425243323050524f47" # OP_RETURN 0x4252323050524f47 "BRC20PROG"
 
 SELF_MINT_ENABLE_HEIGHT = 837090
 
@@ -30,8 +42,6 @@ DEC2LONG = psycopg2.extensions.new_type(
     lambda value, curs: int(value) if value is not None else None)
 psycopg2.extensions.register_type(DEC2LONG)
 
-## load env variables
-load_dotenv()
 db_user = os.getenv("DB_USER") or "postgres"
 db_host = os.getenv("DB_HOST") or "localhost"
 db_port = int(os.getenv("DB_PORT") or "5432")
@@ -46,24 +56,38 @@ report_to_indexer = (os.getenv("REPORT_TO_INDEXER") or "true") == "true"
 report_url = os.getenv("REPORT_URL") or "https://api.opi.network/report_block"
 report_retries = int(os.getenv("REPORT_RETRIES") or "10")
 report_name = os.getenv("REPORT_NAME") or "opi_brc20_indexer"
-create_extra_tables = (os.getenv("CREATE_EXTRA_TABLES") or "false") == "true"
 network_type = os.getenv("NETWORK_TYPE") or "mainnet"
+print("Starting BRC20 indexer with network type: " + network_type + " connected to db " + db_database)
 
 first_inscription_heights = {
   'mainnet': 767430,
   'testnet': 2413343,
+  'testnet4': 0,
   'signet': 112402,
   'regtest': 0,
 }
 first_inscription_height = first_inscription_heights[network_type]
+brc20_prog_first_inscription_height = brc20_prog_first_inscription_heights[network_type]
 
 first_brc20_heights = {
   'mainnet': 779832,
   'testnet': 2413343,
+  'testnet4': 0,
   'signet': 112402,
   'regtest': 0,
 }
 first_brc20_height = first_brc20_heights[network_type]
+
+# TODO: Update heights before launch
+first_brc20_prog_heights = {
+  'mainnet': 0,
+  'testnet': 0,
+  'testnet4': 0,
+  'signet': 0,
+  'regtest': 0,
+}
+
+first_brc20_prog_height = first_brc20_prog_heights[network_type]
 
 if network_type == 'regtest':
   report_to_indexer = False
@@ -98,14 +122,13 @@ if cur.fetchone()[0] == False:
     cur.execute(sql)
   conn.commit()
 
-if create_extra_tables:
-  cur.execute('''SELECT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'brc20_extras_block_hashes') AS table_existence;''')
-  if cur.fetchone()[0] == False:
-    print("Initialising extra tables...")
-    with open('/app/modules/brc20_index/db_init_extra.sql', 'r') as f:
-      sql = f.read()
-      cur.execute(sql)
-    conn.commit()
+cur.execute('''SELECT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'brc20_extras_block_hashes') AS table_existence;''')
+if cur.fetchone()[0] == False:
+  print("Initialising extra tables...")
+  with open('/app/modules/brc20_index/db_init_extra.sql', 'r') as f:
+    sql = f.read()
+    cur.execute(sql)
+  conn.commit()
 
 cur_metaprotocol.execute('SELECT network_type from ord_network_type LIMIT 1;')
 if cur_metaprotocol.rowcount == 0:
@@ -250,6 +273,57 @@ def get_event_str(event, event_type, inscription_id):
     res += event["original_tick"] + ";"
     res += fix_numstr_decimals(event["amount"], decimals_int)
     return res
+  elif event_type == "brc20prog-deploy-inscribe":
+    res = "brc20prog-deploy-inscribe;"
+    res += inscription_id + ";"
+    res += event["source_pkScript"] + ";"
+    res += event["data"]
+    return res
+  elif event_type == "brc20prog-deploy-transfer":
+    res = "brc20prog-deploy-transfer;"
+    res += inscription_id + ";"
+    res += event["source_pkScript"] + ";"
+    res += event["spent_pkScript"] + ";"
+    res += event["data"] + ";"
+    res += event["byte_len"]
+    return res
+  elif event_type == "brc20prog-call-inscribe":
+    res = "brc20prog-call-inscribe;"
+    res += inscription_id + ";"
+    res += event["source_pkScript"] + ";"
+    res += event["contract_address"] + ";"
+    res += event["contract_inscription_id"] + ";"
+    res += event["data"]
+    return res
+  elif event_type == "brc20prog-call-transfer":
+    res = "brc20prog-call-transfer;"
+    res += inscription_id + ";"
+    res += event["source_pkScript"] + ";"
+    res += event["spent_pkScript"] + ";"
+    res += event["contract_address"] + ";"
+    res += event["contract_inscription_id"] + ";"
+    res += event["data"] + ";"
+    res += event["byte_len"]
+    return res
+  elif event_type == "brc20prog-withdraw-inscribe":
+    decimals_int = ticks[event["tick"]][2]
+    res = "brc20prog-withdraw-inscribe;"
+    res += inscription_id + ";"
+    res += event["source_pkScript"] + ";"
+    res += event["tick"] + ";"
+    res += event["original_tick"] + ";"
+    res += fix_numstr_decimals(event["amount"], decimals_int)
+    return res
+  elif event_type == "brc20prog-withdraw-transfer":
+    decimals_int = ticks[event["tick"]][2]
+    res = "brc20prog-withdraw-transfer;"
+    res += inscription_id + ";"
+    res += event["source_pkScript"] + ";"
+    res += event["spent_pkScript"] + ";"
+    res += event["tick"] + ";"
+    res += event["original_tick"] + ";"
+    res += fix_numstr_decimals(event["amount"], decimals_int)
+    return res
   else:
     print("EVENT TYPE ERROR!!")
     exit(1)
@@ -258,22 +332,21 @@ def get_sha256_hash(s):
   return hashlib.sha256(s.encode('utf-8')).hexdigest()
 
 
-
-
-
 ## caches
-transfer_inscribe_event_cache = {} ## single use cache for transfer inscribe events
-def get_transfer_inscribe_event(inscription_id):
-  global transfer_inscribe_event_cache, event_types
-  if inscription_id in transfer_inscribe_event_cache:
-    event = transfer_inscribe_event_cache[inscription_id]
-    del transfer_inscribe_event_cache[inscription_id]
-    return event
-  cur.execute('''select event from brc20_events where event_type = %s and inscription_id = %s;''', (event_types["transfer-inscribe"], inscription_id,))
+event_cache = {} ## single use cache for transfer inscribe events
+def get_event(inscription_id, event_type):
+  global event_cache, event_types
+  if event_type in event_cache and inscription_id in event_cache[event_type]:
+      event = event_cache[event_type][inscription_id]
+      del event_cache[event_type][inscription_id]
+      return event
+  cur.execute('''select event from brc20_events where event_type = %s and inscription_id = %s;''', (event_types[event_type], inscription_id,))
   return cur.fetchall()[0][0]
 
-def save_transfer_inscribe_event(inscription_id, event):
-  transfer_inscribe_event_cache[inscription_id] = event
+def save_event(inscription_id, event, event_type):
+  if event_type not in event_cache:
+    event_cache[event_type] = {}
+  event_cache[event_type][inscription_id] = event
 
 balance_cache = {}
 def get_last_balance(pkscript, tick):
@@ -296,6 +369,12 @@ def get_last_balance(pkscript, tick):
     }
   balance_cache[cache_key] = balance_obj
   return balance_obj
+
+
+def get_last_overall_balance(pkScript, tick):
+  last_balance = get_last_balance(pkScript, tick)
+  return last_balance["overall_balance"]
+
 
 def check_available_balance(pkScript, tick, amount):
   last_balance = get_last_balance(pkScript, tick)
@@ -332,9 +411,9 @@ def set_transfer_as_valid(inscription_id):
   transfer_validity_cache[inscription_id] = 1
 
 def reset_caches():
-  global balance_cache, transfer_inscribe_event_cache, ticks, transfer_validity_cache
+  global balance_cache, event_cache, ticks, transfer_validity_cache
   balance_cache = {}
-  transfer_inscribe_event_cache = {}
+  event_cache = {}
   transfer_validity_cache = {}
   sttm = time.time()
   cur.execute('''select tick, remaining_supply, limit_per_mint, decimals, is_self_mint, deploy_inscription_id from brc20_tickers;''')
@@ -343,6 +422,7 @@ def reset_caches():
   for t in ticks_:
     ticks[t[0]] = [t[1], t[2], t[3], t[4], t[5]]
   print("Ticks refreshed in " + str(time.time() - sttm) + " seconds")
+  brc20_prog_client.clear_caches()
 
 block_start_max_event_id = None
 brc20_events_insert_sql = '''insert into brc20_events (id, event_type, block_height, inscription_id, event) values '''
@@ -419,12 +499,12 @@ def transfer_inscribe(block_height, inscription_id, source_pkScript, source_wall
   last_balance["available_balance"] -= amount
   brc20_historic_balances_insert_cache.append((source_pkScript, source_wallet, tick, last_balance["overall_balance"], last_balance["available_balance"], block_height, event_id))
   
-  save_transfer_inscribe_event(inscription_id, event)
+  save_event(inscription_id, event, "transfer-inscribe")
 
-def transfer_transfer_normal(block_height, inscription_id, spent_pkScript, spent_wallet, tick, original_tick, amount, using_tx_id):
+def transfer_transfer_normal(block_height, block_hash, inscription_id, spent_pkScript, spent_wallet, tick, original_tick, amount, block_timestamp, using_tx_id):
   global in_commit, block_events_str, event_types
 
-  inscribe_event = get_transfer_inscribe_event(inscription_id)
+  inscribe_event = get_event(inscription_id, "transfer-inscribe")
   source_pkScript = inscribe_event["source_pkScript"]
   source_wallet = inscribe_event["source_wallet"]
   event = {
@@ -452,13 +532,24 @@ def transfer_transfer_normal(block_height, inscription_id, spent_pkScript, spent
   last_balance["available_balance"] += amount
   brc20_historic_balances_insert_cache.append((spent_pkScript, spent_wallet, tick, last_balance["overall_balance"], last_balance["available_balance"], block_height, -1 * event_id)) ## negated to make a unique event_id
   
+  if spent_pkScript == BRC20_PROG_OP_RETURN_PKSCRIPT:
+    print("event: brc20_prog_client.deposit")
+    brc20_prog_client.deposit(
+      to_pkscript=source_pkScript,
+      ticker=tick,
+      timestamp=block_timestamp,
+      block_hash=block_hash,
+      amount=amount,
+      inscription_id=inscription_id
+    )
   if spent_pkScript == '6a':
     brc20_tickers_burned_supply_update_cache[tick] = brc20_tickers_burned_supply_update_cache.get(tick, 0) + amount
+
 
 def transfer_transfer_spend_to_fee(block_height, inscription_id, tick, original_tick, amount, using_tx_id):
   global in_commit, block_events_str, event_types
 
-  inscribe_event = get_transfer_inscribe_event(inscription_id)
+  inscribe_event = get_event(inscription_id, "transfer-inscribe")
   source_pkScript = inscribe_event["source_pkScript"]
   source_wallet = inscribe_event["source_wallet"]
   event = {
@@ -480,6 +571,160 @@ def transfer_transfer_spend_to_fee(block_height, inscription_id, tick, original_
   last_balance["available_balance"] += amount
   brc20_historic_balances_insert_cache.append((source_pkScript, source_wallet, tick, last_balance["overall_balance"], last_balance["available_balance"], block_height, event_id))
 
+def brc20_prog_deploy_inscribe(block_height, inscription_id, new_pkScript, content):
+  global block_events_str, event_types
+
+  event = {
+    "source_pkScript": new_pkScript,
+    "data": content["d"],
+  }
+  block_events_str += get_event_str(event, "brc20prog-deploy-inscribe", inscription_id) + EVENT_SEPARATOR
+  event_id = block_start_max_event_id + len(brc20_events_insert_cache) + 1
+  brc20_events_insert_cache.append((event_id, event_types["brc20prog-deploy-inscribe"], block_height, inscription_id, json.dumps(event)))
+  set_transfer_as_valid(inscription_id)
+  save_event(inscription_id, event, "brc20prog-deploy-inscribe")
+
+def brc20_prog_deploy_transfer(block_height, block_hash, block_timestamp, inscription_id, new_pkScript, content, byte_len) -> bool:
+  global block_events_str, event_types
+
+  inscribe_event = get_event(inscription_id, "brc20prog-deploy-inscribe")
+  event = {
+    "source_pkScript": inscribe_event["source_pkScript"],
+    "spent_pkScript": new_pkScript,
+    "data": content["d"],
+    "byte_len": str(byte_len),
+  }
+  block_events_str += get_event_str(event, "brc20prog-deploy-transfer", inscription_id) + EVENT_SEPARATOR
+  event_id = block_start_max_event_id + len(brc20_events_insert_cache) + 1
+  brc20_events_insert_cache.append((event_id, event_types["brc20prog-deploy-transfer"], block_height, inscription_id, json.dumps(event)))
+  set_transfer_as_used(inscription_id)
+
+  if event["spent_pkScript"] != BRC20_PROG_OP_RETURN_PKSCRIPT:
+    print("Invalid spent_pkScript for deploy transfer")
+    return
+
+  print("event: brc20_prog_client.deploy")
+  brc20_prog_client.deploy(
+    from_pkscript=inscribe_event["source_pkScript"],
+    data=content["d"],
+    timestamp=block_timestamp,
+    block_hash=block_hash,
+    inscription_id=inscription_id,
+    inscription_byte_len=byte_len
+  )
+
+
+def brc20_prog_call_inscribe(block_height, inscription_id, new_pkScript, content):
+  global block_events_str, event_types
+
+  event = {
+    "source_pkScript": new_pkScript,
+    "contract_address": content.get("c", ""),
+    "contract_inscription_id": content.get("i", ""),
+    "data": content["d"],
+  }
+  block_events_str += get_event_str(event, "brc20prog-call-inscribe", inscription_id) + EVENT_SEPARATOR
+  event_id = block_start_max_event_id + len(brc20_events_insert_cache) + 1
+  brc20_events_insert_cache.append((event_id, event_types["brc20prog-call-inscribe"], block_height, inscription_id, json.dumps(event)))
+  set_transfer_as_valid(inscription_id)
+  save_event(inscription_id, event, "brc20prog-call-inscribe")
+
+def brc20_prog_call_transfer(block_height, block_hash, block_timestamp, inscription_id, new_pkScript, content, byte_len):
+  global block_events_str, event_types
+
+  inscribe_event = get_event(inscription_id, "brc20prog-call-inscribe")
+  event = {
+    "source_pkScript": inscribe_event["source_pkScript"],
+    "spent_pkScript": new_pkScript,
+    "contract_address": content.get("c", ""),
+    "contract_inscription_id": content.get("i", ""),
+    "data": content["d"],
+    "byte_len": str(byte_len),
+  }
+  block_events_str += get_event_str(event, "brc20prog-call-transfer", inscription_id) + EVENT_SEPARATOR
+  event_id = block_start_max_event_id + len(brc20_events_insert_cache) + 1
+  brc20_events_insert_cache.append((event_id, event_types["brc20prog-call-transfer"], block_height, inscription_id, json.dumps(event)))
+  set_transfer_as_used(inscription_id)
+
+  if event["spent_pkScript"] != BRC20_PROG_OP_RETURN_PKSCRIPT:
+    print("Invalid spent_pkScript for call transfer")
+    return
+
+  brc20_prog_client.call(
+    from_pkscript=inscribe_event["source_pkScript"],
+    contract_address=content.get("c", None),
+    contract_inscription_id=content.get("i", None),
+    data=content["d"],
+    timestamp=block_timestamp,
+    block_hash=block_hash,
+    inscription_id=inscription_id,
+    inscription_byte_len=byte_len
+  )
+
+
+def brc20_prog_withdraw_inscribe(block_height, inscription_id, source_pkScript, source_wallet, ticker, original_tick, amount):
+  global block_events_str, event_types
+
+  event = {
+    "source_pkScript": source_pkScript,
+    "source_wallet": source_wallet,
+    "tick": ticker,
+    "original_tick": original_tick,
+    "amount": str(amount),
+  }
+  block_events_str += get_event_str(event, "brc20prog-withdraw-inscribe", inscription_id) + EVENT_SEPARATOR
+  event_id = block_start_max_event_id + len(brc20_events_insert_cache) + 1
+  brc20_events_insert_cache.append((event_id, event_types["brc20prog-withdraw-inscribe"], block_height, inscription_id, json.dumps(event)))
+  set_transfer_as_valid(inscription_id)
+  save_event(inscription_id, event, "brc20prog-withdraw-inscribe")
+
+
+def brc20_prog_withdraw_transfer(block_height, block_hash, block_timestamp, ticker, original_tick, inscription_id, spent_pkScript, spent_wallet, amount, sent_as_fee):
+  global block_events_str, event_types
+
+  inscribe_event = get_event(inscription_id, "brc20prog-withdraw-inscribe")
+
+  event = {
+    "source_pkScript": inscribe_event["source_pkScript"],
+    "source_wallet": inscribe_event["source_wallet"],
+    "spent_pkScript": spent_pkScript if not sent_as_fee else None,
+    "spent_wallet": spent_wallet if not sent_as_fee else None,
+    "tick": ticker,
+    "original_tick": original_tick,
+    "amount": str(amount),
+  }
+  block_events_str += get_event_str(event, "brc20prog-withdraw-transfer", inscription_id) + EVENT_SEPARATOR
+  event_id = block_start_max_event_id + len(brc20_events_insert_cache) + 1
+  brc20_events_insert_cache.append((event_id, event_types["brc20prog-withdraw-transfer"], block_height, inscription_id, json.dumps(event)))
+  set_transfer_as_used(inscription_id)
+
+  withdraw_result = brc20_prog_client.withdraw(
+    from_pkscript=inscribe_event["source_pkScript"],
+    ticker=ticker,
+    amount=amount,
+    timestamp=block_timestamp,
+    block_hash=block_hash,
+    inscription_id=inscription_id
+  )
+
+  if withdraw_result["status"] == "0x1":
+    # If sent as fee, we withdraw to the source_pkScript
+    # Otherwise, we withdraw to the spent_pkScript
+    if sent_as_fee:
+      withdraw_to = event["source_pkScript"]
+      withdraw_to_wallet = event["source_wallet"]
+    else:
+      withdraw_to = event["spent_pkScript"]
+      withdraw_to_wallet = event["spent_wallet"]
+    last_balance = get_last_balance(withdraw_to, ticker)
+    last_balance["overall_balance"] += amount
+    last_balance["available_balance"] += amount
+    brc20_historic_balances_insert_cache.append((withdraw_to, withdraw_to_wallet, ticker, last_balance["overall_balance"], last_balance["available_balance"], block_height, event_id))
+    last_balance = get_last_balance(BRC20_PROG_OP_RETURN_PKSCRIPT, ticker)
+    last_balance["overall_balance"] -= amount
+    last_balance["available_balance"] -= amount
+    brc20_historic_balances_insert_cache.append((BRC20_PROG_OP_RETURN_PKSCRIPT, '', ticker, last_balance["overall_balance"], last_balance["available_balance"], block_height, -1 * event_id)) ## negated to make a unique event_id
+
 
 def update_event_hashes(block_height):
   global block_events_str
@@ -493,7 +738,7 @@ def update_event_hashes(block_height):
     cumulative_event_hash = get_sha256_hash(cur.fetchone()[0] + block_event_hash)
   cur.execute('''INSERT INTO brc20_cumulative_event_hashes (block_height, block_event_hash, cumulative_event_hash) VALUES (%s, %s, %s);''', (block_height, block_event_hash, cumulative_event_hash))
 
-def index_block(block_height, current_block_hash):
+def index_block(block_height, current_block_hash, block_timestamp: int, is_synced):
   global ticks, block_events_str, block_start_max_event_id, brc20_events_insert_cache, brc20_tickers_insert_cache, brc20_tickers_remaining_supply_update_cache, brc20_tickers_burned_supply_update_cache, brc20_historic_balances_insert_cache, in_commit
   print("Indexing block " + str(block_height))
   block_events_str = ""
@@ -503,20 +748,27 @@ def index_block(block_height, current_block_hash):
     update_event_hashes(block_height)
     cur.execute('''INSERT INTO brc20_block_hashes (block_height, block_hash) VALUES (%s, %s);''', (block_height, current_block_hash))
     return
-  
-  cur_metaprotocol.execute('''SELECT ot.id, ot.inscription_id, ot.old_satpoint, ot.new_pkscript, ot.new_wallet, ot.sent_as_fee, oc."content", oc.content_type, onti.parent_id
+
+  cur_metaprotocol.execute('''SELECT ot.id, ot.inscription_id, ot.old_satpoint, ot.new_pkscript, ot.new_wallet, ot.sent_as_fee, oc."content", oc.byte_len, oc.content_type, onti.parent_id
                               FROM ord_transfers ot
                               LEFT JOIN ord_content oc ON ot.inscription_id = oc.inscription_id
                               LEFT JOIN ord_number_to_id onti ON ot.inscription_id = onti.inscription_id
                               WHERE ot.block_height = %s 
                                  AND onti.cursed_for_brc20 = false
-                                 AND oc."content" is not null AND oc."content"->>'p'='brc-20'
+                                 AND oc."content" is not null
+                                 AND (oc."content"->>'p'='brc-20' 
+                                    OR oc."content"->>'p'='brc20-prog'
+                                    OR (oc."content"->>'p'='brc20-module' AND oc."content"->>'module'='BRC20PROG'))
                               ORDER BY ot.id asc;''', (block_height,))
   transfers = cur_metaprotocol.fetchall()
   if len(transfers) == 0:
     print("No transfers found for block " + str(block_height))
     update_event_hashes(block_height)
     cur.execute('''INSERT INTO brc20_block_hashes (block_height, block_hash) VALUES (%s, %s);''', (block_height, current_block_hash))
+    if block_height >= brc20_prog_first_inscription_height:
+      brc20_prog_client.finalise_block(current_block_hash, block_timestamp)
+      if is_synced or block_height % 100 == 0:
+        brc20_prog_client.commit_to_database()
     return
   print("Transfer count: ", len(transfers))
 
@@ -533,10 +785,10 @@ def index_block(block_height, current_block_hash):
     idx += 1
     if idx % 100 == 0:
       print(idx, '/', len(transfers))
-    
-    tx_id, inscr_id, old_satpoint, new_pkScript, new_addr, sent_as_fee, js, content_type, parent_id = transfer
+
+    tx_id, inscr_id, old_satpoint, new_pkScript, new_addr, sent_as_fee, js, byte_len, content_type, parent_id = transfer
     if parent_id is None: parent_id = ""
-    
+
     if sent_as_fee and old_satpoint == '': continue ## inscribed as fee
 
     if content_type is None: continue ## invalid inscription
@@ -544,8 +796,34 @@ def index_block(block_height, current_block_hash):
     except KeyboardInterrupt:
       raise KeyboardInterrupt
     except: pass
-    content_type = content_type.split(';')[0]
-    if content_type != 'application/json' and content_type != 'text/plain': continue ## invalid inscription
+    content_type_base = content_type.split(';')[0]
+    if content_type != 'application/json' and content_type_base != 'text/plain': continue ## invalid inscription
+
+    if "p" not in js: continue ## invalid inscription
+    if js["p"] != 'brc-20' and js["p"] != 'brc20-prog' and js["p"] != 'brc20-module': continue ## invalid inscription
+
+    # Handle brc20-prog deploy and call inscriptions
+    if js["p"] == 'brc20-prog':
+      if not brc20_prog_client.is_enabled(): continue
+      if block_height < brc20_prog_first_inscription_height: continue
+      if "op" not in js: continue ## invalid inscription
+      if "d" not in js: continue ## invalid inscription
+      # print("found a potentially valid brc20 prog inscription" + str(js))
+      if (js["op"] == 'deploy' or js["op"] == 'd'):
+        if old_satpoint == '':
+          brc20_prog_deploy_inscribe(block_height, inscr_id, new_pkScript, js)
+        else:
+          if is_used_or_invalid(inscr_id): continue
+          brc20_prog_deploy_transfer(block_height, current_block_hash, block_timestamp, inscr_id, new_pkScript, js, byte_len)
+      elif (js["op"] == 'call' or js["op"] == 'c'):
+        if "c" not in js and "i" not in js: continue
+        if "c" in js and "i" in js: continue # Only one of c or i should be present
+        if old_satpoint == '':
+          brc20_prog_call_inscribe(block_height, inscr_id, new_pkScript, js)
+        else:
+          if is_used_or_invalid(inscr_id): continue
+          brc20_prog_call_transfer(block_height, current_block_hash, block_timestamp, inscr_id, new_pkScript, js, byte_len)
+      continue
 
     if "tick" not in js: continue ## invalid inscription
     if "op" not in js: continue ## invalid inscription
@@ -557,7 +835,26 @@ def index_block(block_height, current_block_hash):
     except: continue ## invalid tick
     original_tick_len = utf8len(original_tick)
     if original_tick_len != 4 and original_tick_len != 5: continue ## invalid tick
-    
+
+    # handle brc-20 prog withdraw inscriptions
+    if js["p"] == 'brc20-module':
+      if not brc20_prog_client.is_enabled(): continue
+      if block_height < brc20_prog_first_inscription_height: continue
+      if "module" not in js: continue
+      if js["module"] != 'BRC20PROG': continue
+      if js["op"] != 'withdraw': continue
+      if "amt" not in js: continue
+      if not is_positive_number_with_dot(js["amt"]): continue
+      amount = get_number_extended_to_18_decimals(js["amt"], ticks[tick][2])
+      if amount is None: continue
+      if amount > (2**64-1) * (10**18) or amount <= 0: continue
+      if old_satpoint == '':
+        brc20_prog_withdraw_inscribe(block_height, inscr_id, new_pkScript, new_addr, tick, original_tick, amount)
+      else:
+        if is_used_or_invalid(inscr_id): continue
+        brc20_prog_withdraw_transfer(block_height, current_block_hash, block_timestamp, tick, original_tick, inscr_id, new_pkScript, new_addr, amount, sent_as_fee)
+      continue
+
     # handle deploy
     if js["op"] == 'deploy' and old_satpoint == '':
       if "max" not in js: continue ## invalid inscription
@@ -630,8 +927,15 @@ def index_block(block_height, current_block_hash):
       else:
         if is_used_or_invalid(inscr_id): continue ## already used or invalid
         if sent_as_fee: transfer_transfer_spend_to_fee(block_height, inscr_id, tick, original_tick, amount, tx_id)
-        else: transfer_transfer_normal(block_height, inscr_id, new_pkScript, new_addr, tick, original_tick, amount, tx_id)
-  
+        else: 
+          transfer_transfer_normal(block_height, current_block_hash, inscr_id, new_pkScript, new_addr, tick, original_tick, amount, block_timestamp, tx_id)
+
+
+  if block_height >= brc20_prog_first_inscription_height:
+    brc20_prog_client.finalise_block(current_block_hash, block_timestamp)
+    if is_synced or block_height % 100 == 0:
+      brc20_prog_client.commit_to_database()
+
   cur.execute("BEGIN;")
   in_commit = True
   print("inserting events...")
@@ -664,32 +968,74 @@ def execute_batch_insert(sql_start, cache, batch_size):
       sql = sql_start + ','.join([single_insert_sql_part for _ in range(elem_cnt)]) + ';'
       cur.execute(sql, [elem for sublist in cache[i:i+batch_size] for elem in sublist])
 
-      
 
 def check_for_reorg():
-  cur.execute('select block_height, block_hash from brc20_block_hashes order by block_height desc limit 1;')
-  if cur.rowcount == 0: return None ## nothing indexed yet
-  last_block = cur.fetchone()
+    brc20_prog_last_block_height = brc20_prog_client.get_block_height()
 
-  cur_metaprotocol.execute('select block_height, block_hash from block_hashes where block_height = %s;', (last_block[0],))
-  # revert this line
-  # if cur_metaprotocol.rowcount == 0: return None ## probably main indexer is fixing hashes for reorg, will correct itself in next run
-  last_block_ord = cur_metaprotocol.fetchone()
-  if last_block_ord[1] == last_block[1]: return None ## last block hashes are the same, no reorg
+    cur.execute(
+        "select block_height, block_hash from brc20_block_hashes order by block_height desc limit 1;"
+    )
+    if cur.rowcount == 0:
+      if not brc20_prog_client.is_enabled():
+        return None ## nothing indexed yet
+      if brc20_prog_last_block_height < brc20_prog_first_inscription_height:
+        return None  ## nothing indexed yet
+      else:
+        return brc20_prog_first_inscription_height - 1  ## brc20_prog is ahead of us
 
-  print("REORG DETECTED!!")
-  cur.execute('select block_height, block_hash from brc20_block_hashes order by block_height desc limit 10;')
-  hashes = cur.fetchall() ## get last 10 hashes
-  for h in hashes:
-    cur_metaprotocol.execute('select block_height, block_hash from block_hashes where block_height = %s;', (h[0],))
-    block = cur_metaprotocol.fetchone()
-    if block[1] == h[1]: ## found reorg height by a matching hash
-      print("REORG HEIGHT FOUND: " + str(h[0]))
-      return h[0]
-  
-  ## bigger than 10 block reorg is not supported by ord
-  print("CRITICAL ERROR!!")
-  sys.exit(1)
+    last_block = cur.fetchone()
+
+    if brc20_prog_client.is_enabled() and brc20_prog_last_block_height >= brc20_prog_first_inscription_height and brc20_prog_last_block_height > last_block[0]:
+      return last_block[0]  ## brc20_prog is ahead of us
+    
+    if brc20_prog_client.is_enabled() and brc20_prog_last_block_height >= brc20_prog_first_inscription_height and brc20_prog_last_block_height < last_block[0]:
+      return brc20_prog_last_block_height  ## brc20_prog is behind us
+
+    while True:
+      cur_metaprotocol.execute(
+          "select block_height, block_hash from block_hashes where block_height = %s;",
+          (last_block[0],),
+      )
+      if cur_metaprotocol.rowcount == 0:
+        time.sleep(2)
+        continue  ## probably main indexer is fixing hashes for reorg, will correct itself in next run
+      break
+    last_block_ord = cur_metaprotocol.fetchone()
+    last_block_brc20_prog = brc20_prog_client.get_block_hash(last_block[0])
+    if last_block_ord[1] == last_block[1] and (
+        not brc20_prog_client.is_enabled() or last_block[0] < brc20_prog_first_inscription_height or (last_block_brc20_prog is not None and last_block_brc20_prog[2:] == last_block[1])
+    ):
+        return None  ## last block hashes are the same, no reorg and heights match
+
+    print("REORG DETECTED!!")
+    cur.execute(
+        "select block_height, block_hash from brc20_block_hashes order by block_height desc limit 10;"
+    )
+    hashes = cur.fetchall()  ## get last 10 hashes
+    for h in hashes:
+        cur_metaprotocol.execute(
+            "select block_height, block_hash from block_hashes where block_height = %s;",
+            (h[0],),
+        )
+        block = cur_metaprotocol.fetchone()
+        brc20_prog_block_hash = brc20_prog_client.get_block_hash(h[0])
+        if block[1] == h[1] and (
+            not brc20_prog_client.is_enabled() or (brc20_prog_block_hash is not None and brc20_prog_block_hash[2:] == h[1])
+        ):  ## found reorg height by a matching hash
+            print("REORG HEIGHT FOUND: " + str(h[0]))
+            return h[0]
+
+    ## bigger than 10 block reorg is not supported by ord
+    print("CRITICAL ERROR!! REORG LARGER THAN 10 BLOCKS DETECTED!!")
+    print("LAST BRC20 BLOCK HEIGHT: " + str(last_block[0]))
+    print("LAST BRC20 BLOCK HASH: " + str(last_block[1]))
+    print("LAST ORD BLOCK HEIGHT: " + str(last_block_ord[0]))
+    print("LAST ORD BLOCK HASH: " + str(last_block_ord[1]))
+    if brc20_prog_client.is_enabled():
+      print("BRC20 PROG BLOCK HEIGHT: " + str(brc20_prog_last_block_height))
+      if brc20_balance_server:
+        brc20_balance_server.stop()
+    sys.exit(1)
 
 def reorg_fix(reorg_height):
   global event_types
@@ -718,6 +1064,11 @@ def reorg_fix(reorg_height):
   cur.execute('delete from brc20_block_hashes where block_height > %s;', (reorg_height,)) ## delete new block hashes
   cur.execute("SELECT setval('brc20_block_hashes_id_seq', max(id)) from brc20_block_hashes;") ## reset id sequence
   cur.execute('commit;')
+
+  if brc20_prog_client.is_enabled():
+    if brc20_prog_client.get_block_height() != brc20_prog_first_inscription_height - 1:
+      brc20_prog_client.reorg(max(reorg_height, brc20_prog_first_inscription_height - 1))
+      brc20_prog_client.commit_to_database()
   reset_caches()
 
 def check_if_there_is_residue_from_last_run():
@@ -821,6 +1172,7 @@ def fix_db_from_version(version):
     print("Fixing db from version 4")
     ## change type of original_tick in brc20_tickers to text
     cur.execute('''alter table brc20_tickers alter column original_tick type text;''')
+    reorg_fix(SELF_MINT_ENABLE_HEIGHT - 1)
   else:
     print("Unknown db version, cannot fix db.")
     exit(1)
@@ -1127,17 +1479,57 @@ def check_extra_tables():
     traceback.print_exc()
     return
 
+brc20_prog_client.clear_caches()
 check_if_there_is_residue_from_last_run()
-if create_extra_tables:
-  check_if_there_is_residue_on_extra_tables_from_last_run()
-  print("checking extra tables")
-  check_extra_tables()
+check_if_there_is_residue_on_extra_tables_from_last_run()
+print("checking extra tables")
+check_extra_tables()
 
 last_report_height = 0
+
+# initialise genesis on brc20_prog
+if brc20_prog_client.is_enabled():
+  print("brc20_prog client is enabled...")
+  if brc20_prog_client.version() != BRC20_PROG_VERSION:
+    print("BRC20 Prog version mismatch!! Required: " + str(BRC20_PROG_VERSION) + " Found: " + str(brc20_prog_client.version()))
+    sys.exit(1)
+
+  # print latest block hash and height
+  cur.execute(
+      "select block_height, block_hash from brc20_block_hashes order by block_height desc limit 1;"
+  )
+  if cur.rowcount == 0:
+    print("Latest block height: 0")
+  else:
+    row = cur.fetchone()
+    print("Latest block height: " + str(row[0]))
+    print("Latest block hash: " + row[1])
+
+  brc20_balance_server = BRC20BalanceServer(get_last_overall_balance)
+  brc20_balance_server.start()
+
+  if brc20_prog_client.get_block_height() == 0:
+    # Initial blocks are not indexed, so we need to mine the first blocks in brc20_prog
+    print("Mining initial blocks...")
+    brc20_prog_client.mine_blocks(brc20_prog_first_inscription_height - 1)
+
+  cur_metaprotocol.execute('''select block_hash, block_timestamp  from block_hashes where block_height = %s;''', (brc20_prog_first_inscription_height - 1,))
+  if cur_metaprotocol.rowcount != 0:
+    current_block_hash, block_timestamp = cur_metaprotocol.fetchone()
+    print("Initialising genesis on brc20_prog")
+    brc20_prog_client.initialise(current_block_hash, int(block_timestamp.timestamp()), brc20_prog_first_inscription_height - 1)
+  
+  brc20_prog_client.commit_to_database()
+
+  reorg_height = check_for_reorg()
+  if reorg_height is not None:
+    print("Rolling back to ", reorg_height)
+    reorg_fix(reorg_height)
+    print("Rolled back to " + str(reorg_height))
+
 while True:
   check_if_there_is_residue_from_last_run()
-  if create_extra_tables:
-    check_if_there_is_residue_on_extra_tables_from_last_run()
+  check_if_there_is_residue_on_extra_tables_from_last_run()
   ## check if a new block is indexed
   cur_metaprotocol.execute('''SELECT coalesce(max(block_height), -1) as max_height from block_hashes;''')
   max_block_of_metaprotocol_db = cur_metaprotocol.fetchone()[0]
@@ -1150,10 +1542,10 @@ while True:
     print("Waiting for new blocks...")
     time.sleep(5)
     continue
-  
-  print("Processing block %s" % current_block)
-  cur_metaprotocol.execute('select block_hash from block_hashes where block_height = %s;', (current_block,))
-  current_block_hash = cur_metaprotocol.fetchone()[0]
+
+  print("Processing block %s at %s" % (current_block, time.strftime("%Y-%m-%d %H:%M:%S")))
+  cur_metaprotocol.execute('select block_hash, block_timestamp from block_hashes where block_height = %s;', (current_block,))
+  current_block_hash, block_timestamp = cur_metaprotocol.fetchone()
   reorg_height = check_for_reorg()
   if reorg_height is not None:
     print("Rolling back to ", reorg_height)
@@ -1161,25 +1553,39 @@ while True:
     print("Rolled back to " + str(reorg_height))
     continue
   try:
-    index_block(current_block, current_block_hash)
-    if create_extra_tables and max_block_of_metaprotocol_db - current_block < 10: ## only update extra tables at the end of sync
+    if current_block == brc20_prog_first_inscription_height:
+      print("initialising genesis on brc20_prog")
+      cur_metaprotocol.execute('''select block_hash, block_timestamp  from block_hashes where block_height = %s;''', (brc20_prog_first_inscription_height - 1,))
+      prog_genesis_block_hash, prog_genesis_timestamp = cur_metaprotocol.fetchone()
+      brc20_prog_client.initialise(prog_genesis_block_hash, int(prog_genesis_timestamp.timestamp()), brc20_prog_first_inscription_height - 1),
+      brc20_prog_client.commit_to_database()
+    index_block(current_block, current_block_hash, int(block_timestamp.timestamp()), current_block == max_block_of_metaprotocol_db)
+    if max_block_of_metaprotocol_db - current_block < 10: ## only update extra tables at the end of sync
       print("checking extra tables")
       check_extra_tables()
     if max_block_of_metaprotocol_db - current_block < 10 or current_block - last_report_height > 100: ## do not report if there are more than 10 blocks to index
       report_hashes(current_block)
       last_report_height = current_block
+    print("Block %s indexed successfully at %s" % (current_block, time.strftime("%Y-%m-%d %H:%M:%S")))
   except KeyboardInterrupt:
+    print("KeyboardInterrupt detected, stopping...")
+    brc20_prog_client.clear_caches()
+    if brc20_balance_server:
+      brc20_balance_server.stop()
     traceback.print_exc()
     if in_commit: ## rollback commit if any
-      print("rolling back")
+      print("rolling back 1")
       cur.execute('''ROLLBACK;''')
       in_commit = False
     print("Exiting...")
     sys.exit(1)
   except:
+    print("Error while indexing block ")
+    brc20_prog_client.clear_caches()
     traceback.print_exc()
     if in_commit: ## rollback commit if any
-      print("rolling back")
+      print("rolling back 2")
       cur.execute('''ROLLBACK;''')
       in_commit = False
+    reset_caches()
     time.sleep(10)

@@ -40,9 +40,25 @@ CREATE UNIQUE INDEX brc20_extras_block_hashes_block_height_idx ON public.brc20_e
 
 --- added for /tokens endpoint
 CREATE INDEX brc20_tickers_lower_tick_idx ON public.brc20_tickers (LOWER(tick));
-CREATE INDEX brc20_events_event_type_jsonb_idx ON public.brc20_events (event_type) INCLUDE (event);
 CREATE INDEX brc20_events_tick_idx
   ON public.brc20_events ((event->>'tick'))
   WHERE event_type = 1;
-
 CREATE INDEX brc20_events_type_tick_idx ON public.brc20_events (event_type, (event->>'tick'));
+
+--- optimize momentum_score
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX brc20_events_event_type_tick_lower_idx 
+ON public.brc20_events (event_type, LOWER(event->>'tick'));
+CREATE INDEX brc20_tickers_supply_idx ON brc20_tickers(remaining_supply, max_supply);
+CREATE INDEX brc20_events_event_tick_gin_idx 
+ON public.brc20_events USING gin ((event->>'tick') gin_trgm_ops);
+CREATE INDEX brc20_tickers_remaining_supply_max_supply_idx 
+ON public.brc20_tickers(remaining_supply, max_supply);
+CREATE INDEX brc20_events_event_tick_lower_idx 
+ON public.brc20_events (LOWER(event->>'tick'));
+
+CREATE INDEX brc20_events_event_type_lower_tick_partial_idx
+ON public.brc20_events USING gin ((LOWER(event->>'tick')) gin_trgm_ops)
+WHERE event_type = 1;
+
+

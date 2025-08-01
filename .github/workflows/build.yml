@@ -5,7 +5,7 @@ name: Build, Push
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "dev", "main" ]
 
 jobs:
   build:
@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Deploy to Dev
-      if: github.ref == 'refs/heads/main'
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
       run: |
           curl -f \
             -X POST \
@@ -65,7 +65,7 @@ jobs:
             https://api.github.com/repos/ordinalsbot/infra/dispatches
 
     - name: Deploy to Testnet
-      if: github.ref == 'refs/heads/main'
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
       run: |
           curl -f \
             -X POST \
@@ -75,7 +75,7 @@ jobs:
             https://api.github.com/repos/ordinalsbot/infra/dispatches
 
     - name: Deploy to Signet
-      if: github.ref == 'refs/heads/main'
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
       run: |
           curl -f \
             -X POST \

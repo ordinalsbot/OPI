@@ -11,10 +11,13 @@ snap install bitcoin-core
 snap connect bitcoin-core:removable-media
 
 ## create a folder for bitcoin chain
-mkdir /mnt/HC_Volume/bitcoin_chain
+mkdir -p /mnt/HC_Volume/bitcoin_chain
 ## run bitcoind using the new folder
 bitcoin-core.daemon -txindex=1 -datadir="/mnt/HC_Volume/bitcoin_chain" -rest
 ```
+
+> [!WARNING]
+> If running on Signet, add `-signet` to `bitcoin-core.daemon` command, if you're planning on running BRC2.0 Programmable Module, also enable RPC authentication by adding `-rpcuser=<USER>` and `-rpcpassword=<PASSWORD>`.
 
 ## Installing PostgreSQL
 
@@ -111,8 +114,14 @@ rustup update stable
 ## Cloning the repository
 
 ```bash
-git clone https://github.com/bestinslot-xyz/OPI.git
+git clone https://github.com/bestinslot-xyz/OPI.git && cd OPI
 ```
+
+> [!WARNING]
+> If running on Signet with BRC2.0, clone the experimental signet branch by using:
+> ```
+> git clone -b experimental-signet-brc20-prog https://github.com/bestinslot-xyz/OPI.git && cd OPI
+> ```
 
 All next shell script groups assumes that you are in OPI folder cloned by above command.
 
@@ -121,6 +130,8 @@ All next shell script groups assumes that you are in OPI folder cloned by above 
 cd modules/main_index; npm install;
 cd ../brc20_api; npm install;
 cd ../bitmap_api; npm install;
+cd ../pow20_api; npm install;
+cd ../sns_api; npm install;
 ```
 *(Optional):*
 Remove the following from `modules/main_index/node_modules/bitcoinjs-lib/src/payments/p2tr.js`
@@ -171,27 +182,6 @@ cd ord; cargo build --release;
 
 Run `reset_init.py` in each module folder (preferrably start from main_index) to initialise .env file, databases and set other necessary files.
 
-# (Optional) Restore from an online backup for faster initial sync
-
-1) Install dependencies: (pbzip2 is optional but greatly impoves decompress speed)
-
-```bash
-sudo apt update
-sudo apt install postgresql-client-common
-sudo apt install postgresql-client-14
-sudo apt install pbzip2
-
-python3 -m pip install boto3
-python3 -m pip install tqdm
-```
-
-2) Run `restore.py`
-
-```bash
-cd modules/;
-python3 restore.py;
-```
-
 # Run
 
 Postgres will auto run on system start. \
@@ -205,6 +195,14 @@ node index.js;
 ```
 
 **BRC-20 Indexer**
+
+> [!WARNING]
+> If running BRC2.0, set up and run brc20_prog server using the instructions at [bestinslot-xyz/brc20-programmable-module#usage](https://github.com/bestinslot-xyz/brc20-programmable-module#usage) before running `brc20_index.py`.
+> 
+> BRC2.0 requires setting up the `BITCOIN_RPC_USER` and `BITCOIN_RPC_PASSWORD`, and on Signet, `BITCOIN_RPC_NETWORK=signet`.
+> 
+> BRC2.0 needs to be running before starting the brc20 indexer. When running `reset_init.py`, enable BRC2.0 by setting the variable to true when asked.
+
 ```bash
 cd modules/brc20_index;
 python3 brc20_index.py;
@@ -249,10 +247,24 @@ cd modules/sns_api;
 node api.js;
 ```
 
+**POW20 Indexer**
+```bash
+cd modules/pow20_index;
+python3 pow20_index.py;
+```
+
+**POW20 API**
+
+This is an optional API and doesn't need to be run.
+
+```bash
+cd modules/pow20_api;
+node api.js;
+```
+
 # Update
 
 - Stop all indexers and apis (preferably starting from main indexer but actually the order shouldn't matter)
 - Update the repo (`git pull`)
 - Recompile ord (`cd ord; cargo build --release;`)
 - Re-run all indexers and apis
-- If rebuild is needed, you can run `restore.py` for faster initial sync
