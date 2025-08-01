@@ -5,6 +5,38 @@ var cors = require('cors')
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 
+// --- Simple SWR cache (in-memory) ---
+const staleWindowInterval = 60_000;
+const MOMENTUM_CACHE = new Map();
+/**
+ * @param {string} key
+ * @param {() => Promise<any>} fetcher  // must return the final JSON payload you send
+ * @param {number} STALE_MS             // how long before we refresh in background
+ */
+async function swrGet(key, fetcher, STALE_MS = 60_000) {
+  const now = Date.now();
+  const entry = MOMENTUM_CACHE.get(key);
+
+  if (entry) {
+    // If stale and not already refreshing, kick off a background refresh
+    if (now - entry.ts > STALE_MS && !entry.refreshing) {
+      entry.refreshing = true;
+      entry.refreshPromise = fetcher()
+        .then(data => {
+          MOMENTUM_CACHE.set(key, { data, ts: Date.now(), refreshing: false });
+        })
+        .catch(() => { entry.refreshing = false; }); // keep old data if refresh fails
+    }
+    return { data: entry.data, hit: true };
+  }
+
+  // Cold start: fetch once, store, return
+  const data = await fetcher();
+  MOMENTUM_CACHE.set(key, { data, ts: now, refreshing: false });
+  return { data, hit: false };
+}
+
+
 // for self-signed cert of postgres
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
@@ -784,53 +816,21 @@ app.get('/v1/brc20/tokens', async (request, response) => {
         `;
 
         params.push(limit, offset);
-        dataResult = await query_db(dataQuery, params);
 
-        // uncomment to disable pagination
-        // const dataQueryWithoutPagination = `
-        //   WITH tickers_with_momentum AS (
-        //     SELECT tick,
-        //           max_supply,
-        //           remaining_supply,
-        //           limit_per_mint,
-        //           block_height,
-        //           deploy_inscription_id,
-        //           is_self_mint,
-        //           (SELECT COUNT(DISTINCT wallet) 
-        //               FROM brc20_current_balances 
-        //             WHERE brc20_current_balances.tick = brc20_tickers.tick) AS holders,
-        //           (
-        //             (SELECT COUNT(*) 
-        //                 FROM brc20_events 
-        //               WHERE event_type = 1 
-        //                 AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
-        //                 AND block_height >= (SELECT MAX(block_height) - 144 FROM brc20_block_hashes)
-        //             ) +
-        //             (SELECT COUNT(*) 
-        //                 FROM brc20_mempool_events 
-        //               WHERE event_type = 1 
-        //                 AND LOWER(event->>'tick') = LOWER(brc20_tickers.tick)
-        //                 AND block_height >= (SELECT MAX(block_height) - 144 FROM brc20_block_hashes)
-        //             )
-        //           ) AS momentum_score
-        //     FROM brc20_tickers
-        //     ${whereSQL}
-        //   )
-        //   SELECT *
-        //   FROM tickers_with_momentum
-        //   WHERE momentum_score > 0; 
-        // `;
-        // dataResult = await query_db(dataQueryWithoutPagination, params);
+        // build a deterministic cache key for this momentum request
+        const cacheKey = `v1:momentum:page=${page}:limit=${limit}:ticker=${ticker || ''}:blocks=${momentum_blocks}`;
 
-        tokens = dataResult.rows;
-        totalTokens = tokens.length;
+        // fetcher returns the exact payload you send to clients
+        const fetcher = async () => {
+          const dataResult = await query_db(dataQuery, params);
+          const rows = dataResult.rows;
+          return { error: null, total: rows.length, result: rows };
+        };
 
-        // this is a specially crafted query, we return here
-        return response.send({
-          error: null,
-          total: totalTokens,
-          result: tokens
-        });
+        // serve cached immediately; refresh in background if stale
+        const { data, hit } = await swrGet(cacheKey, fetcher, staleWindowInterval);
+        response.set('X-Cache', hit ? 'HIT' : 'MISS');
+        return response.send(data);
       }
       console.log("mint_status", mint_status);
       console.log("whereClauses", whereClauses);
